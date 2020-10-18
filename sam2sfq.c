@@ -1,102 +1,186 @@
 //
-// Created by 63175 on 2019/8/1.
+// Created by 63175 on 2019/10/28.
 //
 
+#include <getopt.h>
 #include <stdio.h>
-#include <unistd.h>
-
-#ifdef USE_MALLOC_WRAPPERS
-#  include "malloc_wrap.h"
-#endif
+#include <string.h>
+#include <limits.h>
+#include <assert.h>
 
 #include "samop.h"
+#include "progress.h"
+#include "ksort.h"
 
-void sam2sfqUsage() {
+static int usage() {
 	fprintf(stderr, "\n");
-	fprintf(stderr, "Program:    sam2sfq get sorted FASTQ file from SAM file\n");
-	fprintf(stderr, "Usage:      sam2sfq [options]\n");
+	fprintf(stderr, "Program:    sam2sfq   generate sorted FASTQ file from Coordinate-sorted SAM file\n");
+	fprintf(stderr, "                      consecutive reads share the largest overlap in sorted FASTQ file\n");
+	fprintf(stderr, "Usage:      sam2sfq   [options]\n");
 	fprintf(stderr, "\n");
-	fprintf(stderr, "            -i STR        SAM format input file\n");
-	fprintf(stderr, "            -o STR        SFQ format output file\n");
+	fprintf(stderr, "            -i STR        SAM file name\n");
+	fprintf(stderr, "            -o STR        FASTQ file name\n");
+	fprintf(stderr, "            -K INT        pairing buffer size [10000000], only in PE mode\n");
 	fprintf(stderr, "\n");
+	return 1;
 }
 
-int doSAMToSFQ(FILE *fi, FILE *fo) {
-	SAMInfo_t info = samGetInfo(fi);
-	SAMNode_v *sams = &info.rec1;
-	SAMOpAux_t *aux = &info.aux;
-	kstring_t *bs = &aux->bigStr;
-	char *SO = samGetHeaderValue(&info, "SO");
-	if(SO==NULL || strcmp(SO, "coordinate") != 0) {
-		fprintf(stderr, "SAM文件没有按坐标排序\n");
+static void write_sfq1(sam_core1_v *s, FILE *f) {
+	if(!s->n) return ;
+	fprintf(stderr, "[%s] Output sorted FASTQ...\n", __func__);
+	progress_t bar;
+	progress_init(&bar, "", 100, PROGRESS_CHR_STYLE);
+	int i, j, reads_n = 0, min_l = INT_MAX, max_l = 0;
+	for(i = 0; i < s->n; ++i) {
+		sam_core1_t *r = &s->a[i];
+		if(sup_ali(r->flag) || sec_ali(r->flag)) { // don't output secondary / supplementary segment.
+			continue;
+		}
+		int has_N = 0;
+		for(j = 0; r->seq[j]; ++j) {
+			if(r->seq[j] == 'N') {
+				has_N = 1;
+				break;
+			}
+		}
+		if(unmap(r->flag) && has_N) { // reads quality control: throw out unmapped reads with N(has too many N).
+			continue;
+		}
+		++reads_n;
+		int len = (int)strlen(r->seq);
+		min_l = (min_l < len) ?min_l :len;
+		max_l = (max_l > len) ?max_l :len;
+		fputs("@", f); fputs(r->qname, f); fputs("\n", f);
+		fputs(r->seq, f); fputs("\n", f);
+		fputs("+", f); fputs("\n", f);
+		fputs(r->qual, f); fputs("\n", f);
+		progress_show(&bar, 1.0*(i+1)/s->n);
+	}
+	progress_destroy(&bar);
+	fprintf(stderr, "\n");
+	fprintf(stderr, "    done! get %d reads\n", reads_n);
+	fprintf(stderr, "    min-read-length %d\n", min_l);
+	fprintf(stderr, "    max-read-length %d\n", max_l);
+}
+static void keep_primary(sam_core1_v *s) {
+	int i, old_n = (int)s->n;
+	s->n = 0;
+	for(i = 0; i < old_n; ++i) {
+		sam_core1_t *r = &s->a[i];
+		if(sup_ali(r->flag) || sec_ali(r->flag)) {
+			free(r->data);
+		} else {
+			kv_push(sam_core1_t, *s, *r);
+		}
+	}
+}
+
+#define sam_core1_lt(a, b) (strcmp((a).rname, (b).rname) != 0 ?strcmp((a).rname, (b).rname) < 0 :(a).pos < (b).pos)
+KSORT_INIT(sam_core1, sam_core1_t, sam_core1_lt)
+
+static void write_sfq2(sam_core1_v *s1, sam_core1_v *s2, FILE *f, int K) {
+	if(!s1->n || !s2->n) return ;
+	fprintf(stderr, "Discard secondary and supplementary records...\n");
+	keep_primary(s1);
+	keep_primary(s2);
+	assert(s1->n == s2->n);
+	fprintf(stderr, "    READ1, READ2 primary records: %ld\n", s1->n);
+	fprintf(stderr, "Output sorted FASTQ...\n");
+	progress_t bar;
+	progress_init(&bar, "", 100, PROGRESS_CHR_STYLE);
+	int i, j, pairs_n = 0, min_l = INT_MAX, max_l = 0, bytes = 0;
+	sam_core1_v out_v; kv_init(out_v);
+	for(i = 0; i < s1->n; ++i) {
+		progress_show(&bar, 1.0 * (i + 1) / s1->n);
+		sam_core1_t *r1 = &s1->a[i], *r2 = &s2->a[i];
+		assert(strcmp(r1->qname, r2->qname) == 0);
+		int len1 = (int)strlen(r1->seq), drop1 = 0, has_N = 0;
+		for(j = 0; j < len1; ++j) {
+			if(r1->seq[j] == 'N') {
+				has_N = 1;
+				break;
+			}
+		}
+		if(unmap(r1->flag) && has_N) { drop1 = 1; }
+		int len2 = (int)strlen(r2->seq), drop2 = 0; has_N = 0;
+		for(j = 0; j < len2; ++j) {
+			if(r2->seq[j] == 'N') {
+				has_N = 1;
+				break;
+			}
+		}
+		if(unmap(r2->flag) && has_N) { drop2 = 1; }
+		if(drop1 || drop2) { // reads quality control: throw out unmapped reads with N(has too many N).
+			continue;
+		}
+		++pairs_n;
+		kv_push(sam_core1_t, out_v, *r1); kv_push(sam_core1_t, out_v, *r2);
+		bytes += len1 + len2;
+		if(bytes > K) {
+			bytes = 0;
+			ks_introsort(sam_core1, out_v.n, out_v.a);
+			for(j = 0; j < out_v.n; ++j) {
+				sam_core1_t *r = &out_v.a[j];
+				int len = (int)strlen(r->seq);
+				min_l = (min_l < len) ?min_l :len;
+				max_l = (max_l > len) ?max_l :len;
+				fputs("@", f); fputs(r->qname, f); if(is_read1(r->flag)) fputs("/1\n", f); else fputs("/2\n", f);
+				fputs(r->seq, f); fputs("\n", f);
+				fputs("+", f); fputs("\n", f);
+				fputs(r->qual, f); fputs("\n", f);
+			}
+			out_v.n = 0;
+		}
+	}
+	progress_destroy(&bar);
+	for(j = 0; j < out_v.n; ++j) {
+		sam_core1_t *r = &out_v.a[j];
+		int len = (int)strlen(r->seq);
+		min_l = (min_l < len) ?min_l :len;
+		max_l = (max_l > len) ?max_l :len;
+		fputs("@", f); fputs(r->qname, f); if(is_read1(r->flag)) fputs("/1\n", f); else fputs("/2\n", f);
+		fputs(r->seq, f); fputs("\n", f);
+		fputs("+", f); fputs("\n", f);
+		fputs(r->qual, f); fputs("\n", f);
+	}
+	fprintf(stderr, "\n");
+	fprintf(stderr, "    done! get %d pairs\n", pairs_n);
+	fprintf(stderr, "    min-read-length %d\n", min_l);
+	fprintf(stderr, "    max-read-length %d\n", max_l);
+}
+
+int sam2sortfq_main(int argc, char *argv[]) {
+	if(argc == 1) {
+		return usage();
+	}
+	const char *opts = "i:o:K:";
+	int c, K = 10000000;
+	FILE *fi = NULL, *fo = NULL;
+	while((c=getopt(argc, argv, opts)) > -1) {
+		if(c == 'i') {
+			fi = fopen(optarg, "r");
+		} else if(c == 'o') {
+			fo = fopen(optarg, "w");
+		} else if(c == 'K') {
+			K = atoi(optarg);
+		} else {
+			return usage();
+		}
+	}
+	if(fi == NULL) {
+		fprintf(stderr, "fail to open SAM file\n");
 		return 1;
 	}
-	// FIXME: 去冗余的策略不好，chimeric reads不能处理
-
-	/* 开始输出sfq文件，已经完成去冗余工作 */
-	int  INF=1000000000; // 染色体长度不超过20,000,000
-	size_t i, j;
-	for(i=0; i<sams->n; ++i) {
-		SAMNode_t *sam = &sams->a[i];
-		/* 不需要维持原fastq中元数据的状态 */
-		fprintf(fo, "@%s\n", bs->s+sam->qname); // 需要加上@做开头
-
-		/* SAM中的SEQ. FIXME：这里的序列可能被hard clipped, 序列可能不全 */
-		char *seq = bs->s + sam->seq;
-		size_t sLen = strlen(seq);
-		for(j=0; j<sLen; ++j) {
-			if(seq[j] == 'N') {
-				seq[j] = 'A';
-			}
+	sam_info_t info = sam_all_records(fi);
+	if(info.mode_pe == 0) {
+		fprintf(stderr, "[%s] is working in SE mode\n", __func__);
+		if(!info.header.hd.SO || strcmp(info.header.hd.SO, "coordinate") != 0) {
+			fprintf(stderr, "Warning: the input SAM isn't sorted by coordinate.\n");
 		}
-		fprintf(fo, "%s\n", bs->s+sam->seq);
-
-		/* 输出两条序列之间的距离 */
-		if(i == 0) {
-			fprintf(fo, "%d\n", INF);
-		} else {
-			SAMNode_t *pre = &sams->a[i-1];
-			if(strcmp(bs->s+pre->rname, bs->s+sam->rname) == 0) {
-				int dis = sam->pos - pre->pos;
-				fprintf(fo, "%d\n", dis); // 先不管两条序列之间的错误数，只要相邻即可。
-			} else {
-				fprintf(fo, "%d\n", INF);
-			}
-		}
-
-		/* 使出质量分数 */
-		fprintf(fo, "%s\n", bs->s+sam->qual);
+		write_sfq1(&info.s0, fo);
+	} else {
+		fprintf(stderr, "[%s] is working in PE mode\n", __func__);
+		write_sfq2(&info.s1, &info.s2, fo, K);
 	}
-	if(fi != NULL) fclose(fi);
-	if(fo != NULL) fclose(fo);
 	return 0;
-}
-
-int sam2sfq_main(int argc, char *argv[]) {
-	if(argc == 1) {
-		sam2sfqUsage();
-		return 0;
-	}
-	int c;
-	FILE *fSAM = NULL, *fSFQ = NULL;
-	while((c=getopt(argc, argv, "i:o:")) > -1) {
-		if(c == 'i') {
-			fSAM = fopen(optarg, "r");
-			if(fSAM == NULL) {
-				fprintf(stderr, "fail to open SAM file\n");
-				return 1;
-			}
-		} else if(c == 'o') {
-			fSFQ = fopen(optarg, "w");
-			if(fSFQ == NULL) {
-				fprintf(stderr, "fail to open SFQ file\n");
-				return 1;
-			}
-		} else {
-			fprintf(stderr, "option error!\n");
-			sam2sfqUsage();
-			return 1;
-		}
-	}
-	return doSAMToSFQ(fSAM, fSFQ);
 }

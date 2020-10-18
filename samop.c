@@ -1,593 +1,547 @@
 //
-// Created by 63175 on 2019/7/31.
+// Created by 63175 on 2019/9/19.
 //
 
-#include <assert.h>
 #include <getopt.h>
+#include <stdio.h>
+#include <string.h>
+#include <assert.h>
+
 #include "samop.h"
-
-#ifdef USE_MALLOC_WRAPPERS
-#  include "malloc_wrap.h"
-#endif
-
-SAMOpt_t samGetOpt(kstring_t *a, SAMOpAux_t *aux) {
-	kstring_t *buf = &aux->optBuf; buf->l = 0;
-	kstring_t *bs = &aux->bigStr;
-	SAMOpt_t res; memset(&res, 0, sizeof(res));
-	int i, stop = 0;
-	for(i=0; i<=a->l; ++i) {
-		if(i==a->l || a->s[i]==':') {
-			++stop;
-			if(stop == 1) { // TAG
-				res.tag = bs->l;
-				kputsn(buf->s, buf->l, bs); kputc('\0', bs); // 注意必须要手动添加'\0'作为结束符。
-			} else if(stop == 2) { // TYPE
-				res.type = bs->l;
-				kputsn(buf->s, buf->l, bs); kputc('\0', bs);
-			} else if(stop == 3) { // VALUE
-				res.value = bs->l;
-				kputsn(buf->s, buf->l, bs); kputc('\0', bs);
-			}
-			buf->l = 0; // 清空l，但内存m不会变。
-		} else {
-			kputc(a->s[i], buf);
-		}
-	}
-	return res;
-}
-
-SAMNode_t samGetNode(char *s, SAMOpAux_t *aux) {
-	SAMNode_t a; memset(&a, 0, sizeof(SAMNode_t));
-	kstring_t *buf = &aux->nodeBuf; buf->l = 0;
-	kstring_t *bs = &aux->bigStr;
-	SAMOpt_v *opts = &aux->opts;
-	a.optL = opts->n;
-	int i, stop=0, len=(int)strlen(s);
-	for(i=0; i<=len; ++i) {
-		if(i==len || s[i]=='\t') {
-			++stop;
-			if(stop == 1) { // qname
-				a.qname = bs->l;
-				kputsn(buf->s, buf->l, bs); kputc('\0', bs);
-			} else if(stop == 2) { // flag
-				a.flag = kSGetNumber(buf);
-			} else if(stop == 3) { // rname
-				a.rname = bs->l;
-				kputsn(buf->s, buf->l, bs); kputc('\0', bs);
-			} else if(stop == 4) { // pos
-				a.pos = kSGetNumber(buf);
-			} else if(stop == 5) { // MapQ
-				a.mapq = kSGetNumber(buf);
-			} else if(stop == 6) { // CIGAR
-				a.cigar = bs->l;
-				kputsn(buf->s, buf->l, bs); kputc('\0', bs);
-			} else if(stop == 7) { // ref name of next read
-				a.rnext = bs->l;
-				kputsn(buf->s, buf->l, bs); kputc('\0', bs);
-			} else if(stop == 8) { // position of next read
-				a.pnext = kSGetNumber(buf);
-			} else if(stop == 9) { // observed template length
-				a.tlen = kSGetNumber(buf);
-			} else if(stop == 10) { // Seq
-				a.seq = bs->l;
-				kputsn(buf->s, buf->l, bs); kputc('\0', bs);
-			} else if(stop == 11) { // Qual
-				a.qual = bs->l;
-				kputsn(buf->s, buf->l, bs); kputc('\0', bs);
-			} else if(stop >= 12) { // Options
-				kv_push(SAMOpt_t, *opts, samGetOpt(buf, aux));
-			}
-			buf->l = 0;
-		} else {
-			kputc(s[i], buf);
-		}
-	}
-	a.optR = opts->n;
-	return a;
-}
-
-void samHandleHeader(char *s, SAMHeader_t *h, SAMOpAux_t *aux) {
-	kstring_t *buf = &aux->headerBuf; buf->l = 0;
-	kstring_t *bs = &aux->bigStr;
-	int i, len=(int)strlen(s), type = -1;
-	/* 获得type, 一共5种 */
-	for(i=0; i<len; ++i) {
-		if(s[i]=='\t') {
-			if(strcmp(buf->s, "@HD") == 0) {
-				type = 1;
-			} else if(strcmp(buf->s, "@SQ") == 0) {
-				type = 2;
-			} else if(strcmp(buf->s, "@RG") == 0) {
-				type = 3;
-			} else if(strcmp(buf->s, "@PG") == 0) {
-				type = 4;
-			} else {
-				type = 5;
-			}
-			buf->l = 0;
-			++i;
-			break;
-		} else {
-			kputc(s[i], buf);
-		}
-	}
-	assert(type != -1);
-	if(type != 5) {
-		/* 以TAB为分隔符，末尾一定有个换行符，可能有多个TAG:VALUE */
-		SAMHeaderTV_v *tvs;
-		if(type == 1) {
-			tvs = &h->HD;
-		} else if(type == 2) { // SQ和RG都可能有多行
-			tvs = kv_pushp(SAMHeaderTV_v, h->SQs);
-		} else if(type == 3) {
-			tvs = kv_pushp(SAMHeaderTV_v, h->RGs);
-		} else {
-			tvs = &h->PG;
-		}
-		kv_init(*tvs); // 这里可以清空，每次处理一行的信息。
-		for(; i<=len; ++i) {
-			if(i==len || s[i]=='\t') {
-				SAMHeaderTV_t tv; memset(&tv, 0, sizeof(tv));
-				// 所有的tag都是2个字符
-				tv.tag = bs->l;
-				kputsn(buf->s, 2, bs);  kputc('\0', bs);
-				tv.value = bs->l;
-				kputsn(buf->s+3, buf->l-3, bs); kputc('\0', bs);
-				kv_push(SAMHeaderTV_t, *tvs, tv);
-				buf->l = 0;
-			} else {
-				kputc(s[i], buf);
-			}
-		}
-	} else {
-		/* 一行注释信息 */
-		for(; i<len; ++i) {
-			kputc(s[i], buf);
-		}
-		h->CO = bs->l;
-		kputsn(buf->s, buf->l, bs);  kputc('\0', bs);
-	}
-}
-void samShowHeader(SAMHeader_t *h, SAMOpAux_t *aux) {
-	kstring_t *bs = &aux->bigStr;
-	int i, j;
-	printf("\n");
-	if(h->HD.n != 0) {
-		printf("----------@HD----------\n");
-		for(i=0; i<h->HD.n; ++i) {
-			SAMHeaderTV_t *tv = &h->HD.a[i];
-			if(i > 0) printf("\t");
-			printf("%s:%s", bs->s+tv->tag, bs->s+tv->value);
-		}
-		printf("\n");
-	}
-	if(h->SQs.n != 0) {
-		printf("----------@SQ----------\n");
-		for(i=0; i<h->SQs.n; ++i) {
-			SAMHeaderTV_v *tvs = &h->SQs.a[i];
-			for(j=0; j<tvs->n; ++j) {
-				SAMHeaderTV_t *tv = &tvs->a[j];
-				if(j > 0) printf("\t");
-				printf("%s:%s", bs->s+tv->tag, bs->s+tv->value);
-			}
-			printf("\n");
-		}
-	}
-	if(h->RGs.n != 0) {
-		printf("----------@RG----------\n");
-		for(i=0; i<h->RGs.n; ++i) {
-			SAMHeaderTV_v *tvs = &h->RGs.a[i];
-			for(j=0; j<tvs->n; ++j) {
-				SAMHeaderTV_t *tv = &tvs->a[j];
-				if(j > 0) printf("\t");
-				printf("%s:%s", bs->s+tv->tag, bs->s+tv->value);
-			}
-			printf("\n");
-		}
-	}
-	if(h->PG.n != 0) {
-		printf("----------@PG----------\n");
-		for(i=0; i<h->PG.n; ++i) {
-			SAMHeaderTV_t *tv = &h->PG.a[i];
-			if(i > 0) printf("\t");
-			printf("%s:%s", bs->s+tv->tag, bs->s+tv->value);
-		}
-		printf("\n");
-	}
-	if(h->CO != -1) {
-		printf("----------@CO----------\n");
-		printf("%s\n", bs->s+h->CO);
-	}
-	printf("\n");
-}
-
-void samInitAux(SAMOpAux_t *aux) {
-	memset(&aux->bigStr, 0, sizeof(aux->bigStr));
-	memset(&aux->headerBuf, 0, sizeof(aux->headerBuf));
-	kv_init(aux->opts);
-	memset(&aux->optBuf, 0, sizeof(aux->optBuf));
-	memset(&aux->nodeBuf, 0, sizeof(aux->nodeBuf));
-}
-
-void samFreeAux(SAMOpAux_t *aux) {
-	free(aux->bigStr.s);
-	free(aux->headerBuf.s);
-	free(aux->opts.a);
-	free(aux->optBuf.s);
-	free(aux->nodeBuf.s);
-}
-
-SAMInfo_t samGetInfo(FILE *f) {
-	char buf[1024 * 1024];
-	SAMInfo_t info;
-	SAMHeader_t *header = &info.header; memset(header, 0, sizeof(*header));
-	header->CO = -1;
-	SAMNode_v *nodes = &info.rec1; kv_init(*nodes);
-	SAMOpAux_t *aux = &info.aux; samInitAux(aux);
-	int cntHeader = 0;
-	size_t bytes = 0;
-	while(fgets(buf, sizeof(buf), f) != NULL) {
-		size_t bLen = strlen(buf);
-		if(buf[bLen-1] == '\n') { // 去掉最后的换行符，fgets一定会把换行符读进来。
-			buf[bLen-1] = '\0';
-		}
-		bytes += bLen;
-		if(buf[0] == '@') {
-			++cntHeader;
-			samHandleHeader(buf, header, aux);
-		} else {
-			kv_push(SAMNode_t, *nodes, samGetNode(buf, aux));
-			if(nodes->n == 1) {
-				samShowHeader(header, aux);
-			} else {
-				if(nodes->n%1000000 == 0) {
-					printf("[%s] has processed %ld SAM nodes, %ld bytes\n", __func__, nodes->n, bytes);
-				}
-			}
-		}
-	}
-	printf("[%s] get %d SAM header information, %ld bytes\n", __func__, cntHeader, bytes);
-	printf("[%s] get %ld SAM nodes\n", __func__, nodes->n);
-	return info;
-}
-
-void samDestroyInfo(SAMInfo_t *info) {
-	// 首部信息没有实际内存，SAM节点内部也没有实际内存，辅助结构中有所有的实际内存
-
-	/* 释放辅助结构 */
-	SAMOpAux_t *aux = &info->aux;
-	samFreeAux(aux);
-
-	/* 释放头部数组 */
-	int i;
-	SAMHeader_t *h = &info->header;
-	free(h->HD.a);
-	for(i=0; i<h->SQs.n; ++i) { // SQ和RG为二维数组
-		SAMHeaderTV_v *tvs = &h->SQs.a[i];
-		free(tvs->a);
-	}
-	free(h->SQs.a);
-	for(i=0; i<h->RGs.n; ++i) {
-		SAMHeaderTV_v *tvs = &h->RGs.a[i];
-		free(tvs->a);
-	}
-	free(h->RGs.a);
-	free(h->PG.a);
-
-	/* 释放节点数组 */
-	SAMNode_v *v = &info->rec1;
-	free(v->a);
-}
-
-void samShowSingle(SAMNode_t *q, SAMOpAux_t *aux, FILE *f) {
-	if(f == NULL) f = stdout;
-	kstring_t *bs = &aux->bigStr;
-	fprintf(f, "qname:    %s\n", bs->s+q->qname);
-	fprintf(f, "flag:     %d\n", q->flag);
-	if((q->flag&samFMulSeg) != 0) {
-		fprintf(f, "    template having multiple segments in sequencing\n");
-	}
-	if((q->flag&samFSegAli) != 0) {
-		fprintf(f, "    each segment properly aligned according to the aligner\n");
-	}
-	if((q->flag&samFUnmap) != 0) {
-		fprintf(f, "    segment unmapped\n");
-	}
-	if((q->flag&samFNxtSeq) != 0) {
-		fprintf(f, "    next segment in the template unmapped\n");
-	}
-	if((q->flag&samFRC) != 0) {
-		fprintf(f, "    SEQ being reverse complemented\n");
-	}
-	if((q->flag&samFNRC) != 0) {
-		fprintf(f, "    SEQ of the next segment in the template being reverse complemented\n");
-	}
-	if((q->flag&samFFst) != 0) {
-		fprintf(f, "    the first segment in the template\n");
-	}
-	if((q->flag&samFLst) != 0) {
-		fprintf(f, "   the last segment in the template\n");
-	}
-	if((q->flag&samFSecAli) != 0) {
-		fprintf(f, "    secondary alignment\n");
-	}
-	if((q->flag&samFNPF) != 0) {
-		fprintf(f, "    not passing filters, such as platform/vendor quality controls\n");
-	}
-	if((q->flag&samFPCR) != 0) {
-		fprintf(f, "    PCR or optical duplicate\n");
-	}
-	if((q->flag&samFSupAli) != 0) {
-		fprintf(f, "    supplementary alignment\n");
-	}
-	fprintf(f, "rname:    %s\n", bs->s+q->rname);
-	fprintf(f, "pos:      %d\n", q->pos);
-	fprintf(f, "mapq:     %d\n", q->mapq);
-	fprintf(f, "CIGAR:    %s\n", bs->s+q->cigar);
-	fprintf(f, "rnext:    %s\n", bs->s+q->rnext);
-	fprintf(f, "pnext:    %d\n", q->pnext);
-	fprintf(f, "tlen:     %d\n", q->tlen);
-	fprintf(f, "seq:      %s\n", bs->s+q->seq);
-	fprintf(f, "qual:     %s\n", bs->s+q->qual);
-
-	size_t i, optL=q->optL, optR=q->optR;
-	SAMOpt_v *opts = &aux->opts;
-	fprintf(f, "options:  %ld\n", optR-optL);
-	for(i=optL; i<optR; ++i) {
-		SAMOpt_t *opt = &opts->a[i];
-		fprintf(f, "    %s:%s:%s\n", bs->s+opt->tag, bs->s+opt->type, bs->s+opt->value);
-	}
-	fprintf(f, "\n");
-}
-
-inline void samDumpNode(SAMNode_t *sam, SAMOpAux_t *aux, FILE *fo) {
-	kstring_t *bs = &aux->bigStr;
-	SAMOpt_v *opts = &aux->opts;
-	fprintf(fo, "%s", bs->s+sam->qname);
-	fprintf(fo, "\t%d", sam->flag);
-	fprintf(fo, "\t%s", bs->s+sam->rname);
-	fprintf(fo, "\t%d", sam->pos);
-	fprintf(fo, "\t%d", sam->mapq);
-	fprintf(fo, "\t%s", bs->s+sam->cigar);
-	fprintf(fo, "\t%s", bs->s+sam->rnext);
-	fprintf(fo, "\t%d", sam->pnext);
-	fprintf(fo, "\t%d", sam->tlen);
-	fprintf(fo, "\t%s", bs->s+sam->seq);
-	fprintf(fo, "\t%s", bs->s+sam->qual);
-	size_t j;
-	for(j=sam->optL; j<sam->optR; ++j) {
-		SAMOpt_t *opt = &opts->a[j];
-		fprintf(fo, "\t%s:%s:%s", bs->s+opt->tag, bs->s+opt->type, bs->s+opt->value);
-	}
-	fprintf(fo, "\n");
-}
-
-void samDump(SAMInfo_t *info, FILE *fo) {
-	SAMHeader_t *h = &info->header;
-	SAMOpAux_t *aux = &info->aux;
-	kstring_t *bs = &aux->bigStr;
-	int i, j;
-	/* 输出头部信息 */
-	if(h->HD.n > 0) {
-		fprintf(fo, "@HD");
-		for(i=0; i<h->HD.n; ++i) {
-			SAMHeaderTV_t *tv = &h->HD.a[i];
-			fprintf(fo, "\t%s:%s", bs->s+tv->tag, bs->s+tv->value);
-		}
-		fprintf(fo, "\n");
-	}
-	if(h->SQs.n > 0) {
-		for(i=0; i<h->SQs.n; ++i) {
-			SAMHeaderTV_v *tvs = &h->SQs.a[i];
-			fprintf(fo, "@SQ");
-			for(j=0; j<tvs->n; ++j) {
-				SAMHeaderTV_t *tv = &tvs->a[j];
-				fprintf(fo, "\t%s:%s", bs->s+tv->tag, bs->s+tv->value);
-			}
-			fprintf(fo, "\n");
-		}
-	}
-	if(h->RGs.n > 0) {
-		for(i=0; i<h->RGs.n; ++i) {
-			SAMHeaderTV_v *tvs = &h->RGs.a[i];
-			fprintf(fo, "@RG");
-			for(j=0; j<tvs->n; ++j) {
-				SAMHeaderTV_t *tv = &tvs->a[j];
-				fprintf(fo, "\t%s:%s", bs->s+tv->tag, bs->s+tv->value);
-			}
-			fprintf(fo, "\n");
-		}
-	}
-	if(h->PG.n > 0) {
-		fprintf(fo, "@PG");
-		for(i=0; i<h->PG.n; ++i) {
-			SAMHeaderTV_t *tv = &h->PG.a[i];
-			fprintf(fo, "\t%s:%s", bs->s+tv->tag, bs->s+tv->value);
-		}
-		fprintf(fo, "\n");
-	}
-	if(h->CO != -1) {
-		fprintf(fo, "@CO");
-		fprintf(fo, "\t%s\n", bs->s+h->CO);
-	}
-	/* 输出SAMNode信息 */
-	SAMNode_v *v = &info->rec1;
-	for(i=0; i<v->n; ++i) {
-		SAMNode_t *sam = &v->a[i];
-		samDumpNode(sam, aux, fo);
-		fflush(fo); // 其实我认为这步没有必要，因为不是格式化输出占用的缓冲区过大导致的段错误
-	}
-}
-
-/* 所谓deduplicate就是处理一条序列对应多个SAM records的情况
- * 从目前的数据来看，只需要把带supplumentary alignment和secondary alignment从SAM records中去掉即可
- * 把剩下的SAM records输出即可以作为SAM2SFQ的输入，生成SFQ格式文件，这是BWA-MEZ的输入
- * multi SAMs' reads的被输出到dup文件中去 */
-int samDedup(SAMInfo_t *info, FILE *dup) {
-	SAMNode_v *v = &info->rec1;
-	char *SO = samGetHeaderValue(info, "SO");
-	if(SO==NULL || strcmp(SO, "queryname")!=0) {
-		fprintf(stderr, "[%s] you have sort SAM file by queryname\n", __func__);
-		return 1;
-	}
-	SAMOpAux_t *aux = &info->aux;
-	printf("[%s] raw SAM has %ld nodes\n", __func__, v->n);
-	size_t i, j;
-	kstring_t *bs = &aux->bigStr;
-	/* 开始去冗余的过程，将对info->sams进行修改 */
-	size_t oldN = v->n;
-	v->n = 0;
-	size_t cntMulti = 0;
-	for(i=0; i<oldN; ++i) {
-		SAMNode_t *si = &v->a[i];
-		SAMNode_t *ps = si; // 拥有完整SEQ的比对
-		// 找所有跟sam[i]有相同queryname的sam[j]
-		for(j=i+1; j<oldN; ++j) {
-			SAMNode_t *sj = &v->a[j];
-			if(strcmp(bs->s+si->qname, bs->s+sj->qname) == 0) {
-				if(dup != NULL) {
-					if(j == i+1) {
-						++cntMulti;
-						/* 第一条比对si一般为主要比对，不带其他flag标识 */
-						fprintf(dup, "multiple SAMs' read %ld\n", cntMulti);
-						samShowSingle(si, aux, dup);
-					}
-					/* 剩余的比对sj，一般为非主要比对（前提是排序得当） */
-					samShowSingle(sj, aux, dup);
-				}
-				if((sj->flag&samFSecAli)==0 && (sj->flag&samFSupAli)==0) {
-					ps = sj;
-				}
-			} else {
-				break;
-			}
-		}
-		i = j-1;
-		kv_push(SAMNode_t, *v,*ps);
-	}
-	printf("[%s] multiple SAMs' reads number = %ld\n", __func__, cntMulti);
-	/* 所谓的去冗余，其实是为了生成sfq文件，真实压缩软件排序不具备这么好的效果 */
-	printf("[%s] deduplicated SAM has %ld nodes\n", __func__, v->n);
-	return 0;
-}
-
-typedef struct {
-	size_t all; // 一条序列可能有多个SAM records.
-	size_t secAli; // 一般是由于重复引起的multiple alignment.
-	size_t supAli; // chimeric alignment.
-	size_t secSup; // 即有multiple alignment, 也有chimeric alignment.
-	size_t others; // 其他情况
-} mulSAMRecords;
-
-void samGetStatistics(SAMInfo_t *info) {
-	SAMNode_v *v = &info->rec1;
-	SAMOpAux_t *aux = &info->aux;
-	int cntUnmapped = 0;
-	size_t i, j;
-	kstring_t *bs = &aux->bigStr;
-	mulSAMRecords mulSR; memset(&mulSR, 0, sizeof(mulSR));
-	for(i=0; i<v->n; ++i) {
-		SAMNode_t *si = &v->a[i];
-		if((si->flag&samFUnmap) != 0) {
-			++cntUnmapped; // 未比对上的序列不可能有Multiple SAM records
-		}
-		int fMulSAMs = 0, fSecAli = 0, fSupAli = 0;
-		for(j=i+1; j<v->n; ++j) {
-			SAMNode_t *sj = &v->a[j];
-			if(strcmp(bs->s+si->qname, bs->s+sj->qname) != 0) {
-				break;
-			}
-			fMulSAMs = 1;
-			if((sj->flag&samFSecAli) != 0) fSecAli = 1;
-			if((sj->flag&samFSupAli) != 0) fSupAli = 1;
-		}
-		if(fMulSAMs == 1) {
-			++mulSR.all;
-			if(fSecAli == 1 && fSupAli == 0) ++mulSR.secAli; // 这条序列为重复序列
-			else if(fSecAli == 0 && fSupAli == 1) ++mulSR.supAli; // 这条序列为chimeric read
-			else if(fSecAli == 1 && fSupAli == 1) ++mulSR.secSup; // 即重复，又是chimeric, 这种情况我认为应该不会出现
-			else ++mulSR.others; // 由其他情况导致了该序列有多条SAM records
-		}
-		i = j-1;
-	}
-	printf("[%s] SAM records                     = %ld\n", __func__, v->n);
-	printf("[%s] unmapped reads                  = %d\n", __func__, cntUnmapped);
-	printf("[%s] reads with multiple SAM records = %ld\n", __func__, mulSR.all);
-	printf("[%s]     multiple mapping      = %ld\n", __func__, mulSR.secAli);
-	printf("[%s]     chimeric alignments   = %ld\n", __func__, mulSR.supAli);
-	printf("[%s]     multiple and chimeric = %ld\n", __func__, mulSR.secSup);
-	printf("[%s]     others                = %ld\n", __func__, mulSR.others);
-}
+#include "utils.h"
+#include "ksort.h"
+#include "kstring.h"
 
 static int usage() {
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Program:    samop handle SAM file\n");
 	fprintf(stderr, "Usage:      samop [options] <in.sam>\n");
 	fprintf(stderr, "\n");
-	fprintf(stderr, "            -s INT        show single SAM record\n");
-	fprintf(stderr, "            -o STR        dump SAM records into output file\n");
-	fprintf(stderr, "            -d            remove chimeric reads，only keep the soft clipped read\n");
-	fprintf(stderr, "            -p            remove chimeric reads，only keep the soft clipped read\n");
-	fprintf(stderr, "            -D STR        dump chimeric reads into output file\n");
+	fprintf(stderr, "            -i STR        input SAM filename\n");
+//	fprintf(stderr, "            -o STR        output SAM filename\n");
+	fprintf(stderr, "            -r INT        show a (pair of) SAM record\n");
+	fprintf(stderr, "            --stat        the statistics of SAM reads\n");
+	fprintf(stderr, "            --wgsim-eval  \n");
+	fprintf(stderr, "            --cov         the coverage of mapped reads\n");
+	fprintf(stderr, "            --dis         the average distance of mapped reads\n");
+//	fprintf(stderr, "            --pri         discard supplementary and secondary alignments, only keep unmapped and primary hits.\n");
+//	fprintf(stderr, "            --cs          consensus sequences built from coordinate-sorted reads\n");
 	fprintf(stderr, "\n");
 	return 1;
+}
+
+void sam_show_header(sam_hdr_t *h) {
+	HD_t *hd = &h->hd;
+	fprintf(stderr, "@HD:\tVN:%s\tSO:%s\n", hd->VN, hd->SO);
+	int i;
+	for(i = 0; i < h->sqv.n; ++i) {
+		SQ_t *sq = &h->sqv.a[i];
+		fprintf(stderr,"@SQ:\tSN:%s\tLN:%d\n", sq->SN, sq->LN);
+	}
+	PG_t *pg = &h->pg;
+	fprintf(stderr,"@PG:\tID:%s\tPN:%s\tVN:%s\tCL:%s\n", pg->ID, pg->PN, pg->VN, pg->CL);
+}
+
+static inline int _2char_equal(char a, char b, const char *c) {
+	return (a == c[0] && b == c[1]);
+}
+
+void sam_header(const char *line, int len, sam_hdr_t *h) {
+	int i, cnt_d = 0, l = 0;
+	const char delimiter = '\t';
+	char type[5], buf[1024];
+	SQ_t sq; memset(&sq, 0, sizeof(sq));
+	for(i = 0; i <= len; ++i) {
+		if(i == len || line[i] == delimiter) {
+			buf[l] = '\0'; l = 0;
+			++cnt_d;
+			if(cnt_d == 1) {
+				strcpy(type, buf);
+			} else {
+				if(!strcmp(type, "HD")) {
+					if(_2char_equal(buf[0], buf[1], "VN")) {
+						h->hd.VN = strdup(buf + 3);
+					} else if(_2char_equal(buf[0], buf[1], "SO")) {
+						h->hd.SO = strdup(buf + 3);
+					}
+				} else if(!strcmp(type, "SQ")) {
+					if(_2char_equal(buf[0], buf[1], "SN")) {
+						sq.SN = strdup(buf + 3);
+					} else if(_2char_equal(buf[0], buf[1], "LN")) {
+						sq.LN = atoi(buf + 3);
+					}
+				} else if(!strcmp(type, "PG")) {
+					if(_2char_equal(buf[0], buf[1], "ID")) {
+						h->pg.ID = strdup(buf + 3);
+					} else if(_2char_equal(buf[0], buf[1], "PN")) {
+						h->pg.PN = strdup(buf + 3);
+					} else if(_2char_equal(buf[0], buf[1], "VN")) {
+						h->pg.VN = strdup(buf + 3);
+					} else if(_2char_equal(buf[0], buf[1], "CL")) {
+						h->pg.CL = strdup(buf + 3);
+					}
+				}
+			}
+		} else {
+			buf[l++] = line[i];
+		}
+	}
+	if(!strcmp(type, "SQ")) {
+		kv_push(SQ_t, h->sqv, sq);
+	}
+}
+
+static inline void get_opt(const char *s, sam_opt_t *opt) {
+	if(_2char_equal(s[0], s[1], "NM")) {
+		opt->nm = atoi(s + 5); // NM:i:
+	} else if(_2char_equal(s[0], s[1], "AS")) {
+		opt->as = atoi(s + 5); // AS:i:
+	}
+}
+
+void sam_record1(const char *line, int len, sam_core1_t *r) {
+	memset(r, 0, sizeof(*r));
+	int i, cnt_d = 0;
+	r->data = strdup(line);
+	for(i = 0; i < len; ++i) {
+		if(r->data[i] == '\t') {
+			r->data[i] = '\0';
+		}
+	}
+	for(i = 0; i < len; ++i) {
+		if(i == 0 || r->data[i-1] == '\0') {
+			if(cnt_d == 0) {
+				r->qname = r->data + i;
+			} else if(cnt_d == 1) {
+				r->flag = atoi(r->data + i);
+			} else if(cnt_d == 2) {
+				r->rname = r->data + i;
+			} else if(cnt_d == 3) {
+				r->pos = atoi(r->data + i);
+			} else if(cnt_d == 4) {
+				r->mapq = atoi(r->data + i);
+			} else if(cnt_d == 5) {
+				r->cigar = r->data + i;
+			} else if(cnt_d == 6) {
+				r->rnext = r->data + i;
+			} else if(cnt_d == 7) {
+				r->pnext = atoi(r->data + i);
+			} else if(cnt_d == 8) {
+				r->tlen = atoi(r->data + i);
+			} else if(cnt_d == 9) {
+				r->seq = r->data + i;
+			} else if(cnt_d == 10) {
+				r->qual = r->data + i;
+			} else {
+				get_opt(r->data + i, &r->opt);
+			}
+		}
+		if(r->data[i] == '\0') {
+			++cnt_d;
+		}
+	}
+}
+
+static long ref_len(const sam_hdr_t *h) {
+	long res = 0;
+	int i;
+	const SQ_v *sqs = &h->sqv;
+	for(i = 0; i < sqs->n; ++i) {
+		res += sqs->a[i].LN;
+	}
+	return res;
+}
+
+sam_info_t sam_all_records(FILE *f) {
+	sam_info_t info;
+	sam_hdr_t *h = &info.header; memset(h, 0, sizeof(*h));
+	sam_core1_v *s1 = &info.s1, *s2 = &info.s2, *s0 = &info.s0;
+	kv_init(*s1); kv_init(*s2); kv_init(*s0);
+	char line[65536]; // for next generation sequence, 64K buffer is safe and enough.
+	sam_core1_t core;
+	size_t r_bytes = 0;
+	int cnt_h = 0;
+	double r_time = realtime();
+	while(fgets(line, sizeof(line), f) != NULL) {
+		int len = (int)strlen(line);
+		r_bytes += len;
+		if(line[len-1] == '\n') { line[--len] = '\0'; }
+		if(line[0] == '@') {
+			++cnt_h;
+			sam_header(line + 1, len - 1, h);
+		} else {
+			sam_record1(line, len, &core);
+			if(is_read1(core.flag) && !is_read2(core.flag)) {
+				kv_push(sam_core1_t, *s1, core);
+			} else if(is_read2(core.flag) && !is_read1(core.flag)) {
+				kv_push(sam_core1_t, *s2, core);
+			} else {
+				kv_push(sam_core1_t, *s0, core);
+			}
+		}
+	}
+	if(info.s1.n != 0 && info.s2.n != 0) {
+		assert(info.s0.n == 0); // record belongs to read1 or read2 in paired-end mode.
+		info.mode_pe = 1;
+	} else if(info.s0.n != 0){
+		assert(info.s1.n == 0 && info.s2.n == 0); // single-end mode.
+		info.mode_pe = 0;
+	} else {
+		info.mode_pe = -1;
+	}
+	assert(info.mode_pe != -1);
+	info.ref_len = ref_len(h);
+	fprintf(stderr, "[%s] reading time cost %.3f sec, %d header, %ld bytes\n", __func__, realtime()-r_time, cnt_h, r_bytes);
+	fprintf(stderr, "    reference length: %ld\n", info.ref_len);
+	if(info.mode_pe == 1) {
+		fprintf(stderr, "    %ld READ1 records, %ld READ2 records\n", s1->n, s2->n);
+	} else {
+		fprintf(stderr, "    %ld single-end records\n", s0->n);
+	}
+	return info;
+}
+
+static void coverage1(const sam_core1_v *s, long ref_l) {
+	int i;
+	long bases = 0;
+	for(i = 0; i < s->n; ++i) {
+		const sam_core1_t *p = &s->a[i];
+		if(!unmap(p->flag)) {
+			bases += strlen(p->seq);
+		}
+	}
+	fprintf(stderr, "[%s] %ld bases, %ld reference, ~%.3f coverage\n", __func__, bases, ref_l, 1.0 * bases / ref_l);
+}
+
+static void coverage2(const sam_core1_v *s1, const sam_core1_v *s2, long ref_l) {
+	int i;
+	long bases = 0;
+	for(i = 0; i < s1->n; ++i) {
+		const sam_core1_t *p = &s1->a[i];
+		if(!unmap(p->flag)) {
+			bases += strlen(p->seq);
+		}
+	}
+	for(i = 0; i < s2->n; ++i) {
+		const sam_core1_t *p = &s2->a[i];
+		if(!unmap(p->flag)) {
+			bases += strlen(p->seq);
+		}
+	}
+	fprintf(stderr, "[%s] %ld bases, %ld reference, ~%.3f coverage\n", __func__, bases, ref_l, 1.0 * bases / ref_l);
+}
+
+static int get_dis(const sam_core1_t *s1, const sam_core1_t *s2) {
+	if(strcmp(s1->rname, s2->rname) != 0) {
+		return -1;
+	} else {
+		assert(s2->pos >= s1->pos);
+		return s2->pos - s1->pos;
+	}
+}
+
+static int get_mis(const char *s1, const char *s2, int d) {
+	int i, ret = 0, len1 = strlen(s1), len2 = strlen(s2);
+	for(i = 0; i < len2 && i+d < len1; ++i) {
+		if(s1[i + d] != s2[i]) {
+			++ret;
+		}
+	}
+	return ret;
+}
+
+void sam_destroy(sam_info_t *info) {
+	sam_hdr_t *h = &info->header;
+	int i;
+	for(i = 0; i < h->sqv.n; ++i) {
+		free(h->sqv.a[i].SN);
+	}
+	free(h->sqv.a);
+	free(h->hd.SO); free(h->hd.VN);
+	free(h->pg.ID); free(h->pg.PN); free(h->pg.VN); free(h->pg.CL);
+	sam_core1_v *s0 = &info->s0, *s1 = &info->s1, *s2 = &info->s2;
+	if(s0->n > 0) {
+		for(i = 0; i < s0->n; ++i) {
+			free(s0->a[i].data);
+		}
+		free(s0->a);
+	}
+	if(s1->n > 0) {
+		for(i = 0; i < s1->n; ++i) {
+			free(s1->a[i].data);
+		}
+		free(s1->a);
+	}
+	if(s2->n > 0) {
+		for(i = 0; i < s2->n; ++i) {
+			free(s2->a[i].data);
+		}
+		free(s2->a);
+	}
+}
+
+#define dis_lt(a, b) (strcmp((a).rname,(b).rname) != 0 ?strcmp((a).rname, (b).rname) < 0 :(a).pos < (b).pos)
+KSORT_INIT(dis, sam_core1_t, dis_lt)
+static void distance2(const sam_core1_v *s1, const sam_core1_v *s2) {
+	sam_core1_v s; kv_init(s);
+	s.m = s1->n + s2->n;
+	s.a = malloc(s.m * sizeof(sam_core1_t));
+	int i;
+	for(i = 0; i < s1->n; ++i) {
+		const sam_core1_t *p = &s1->a[i];
+		if(unmap(p->flag) || sec_ali(p->flag) || sup_ali(p->flag)) {
+			continue;
+		}
+		kv_push(sam_core1_t, s, *p);
+	}
+	for(i = 0; i < s2->n; ++i) {
+		const sam_core1_t *p = &s2->a[i];
+		if(unmap(p->flag) || sec_ali(p->flag) || sup_ali(p->flag)) {
+			continue;
+		}
+		kv_push(sam_core1_t, s, *p);
+	}
+	ks_introsort(dis, s.n, s.a);
+	long all_d = 0, cnt = 0, mis = 0;
+	for(i = 1; i < s.n; ++i) {
+		int d = get_dis(&s.a[i-1], &s.a[i]);
+		if(d != -1) {
+			all_d += d;
+			++cnt;
+			mis += get_mis(s.a[i-1].seq, s.a[i].seq, d);
+		}
+	}
+	fprintf(stderr, "[%s] Average distance between contiguous reads: %.3f\n", __func__, 1.0 * all_d / cnt);
+	fprintf(stderr, "    average mismatches between contiguous reads: %.3f\n", 1.0 * mis / cnt);
+	free(s.a);
+}
+
+static void distance1(const sam_core1_v *s1) {
+	sam_core1_v s; kv_init(s);
+	s.m = s1->n;
+	s.a = malloc(s.m * sizeof(sam_core1_t));
+	int i;
+	for(i = 0; i < s1->n; ++i) {
+		const sam_core1_t *p = &s1->a[i];
+		if(unmap(p->flag) || sec_ali(p->flag) || sup_ali(p->flag)) {
+			continue;
+		}
+		kv_push(sam_core1_t, s, *p);
+	}
+	ks_introsort(dis, s.n, s.a);
+	long all_d = 0, cnt = 0, mis = 0;
+	for(i = 1; i < s.n; ++i) {
+		int d = get_dis(&s.a[i-1], &s.a[i]);
+		if(d != -1) {
+			all_d += d;
+			++cnt;
+			mis += get_mis(s.a[i-1].seq, s.a[i].seq, d);
+		}
+	}
+	fprintf(stderr, "[%s] Average distance between contiguous reads: %.3f\n", __func__, 1.0 * all_d / cnt);
+	fprintf(stderr, "    average mismatches between contiguous reads: %.3f\n", 1.0 * mis / cnt);
+	free(s.a);
+}
+
+static void statistics1(const sam_core1_v *v) {
+	int i;
+	int unmap_n = 0;
+	int sec_n = 0, pri_n = 0, sup_n = 0;
+	for(i = 0; i < v->n; ++i) {
+		const sam_core1_t *r = &v->a[i];
+		if(unmap(r->flag)) ++unmap_n;
+		if(sec_ali(r->flag)) ++sec_n;
+		if(sup_ali(r->flag)) ++sup_n;
+		if(!sec_ali(r->flag) && !sup_ali(r->flag)) ++pri_n;
+	}
+	fprintf(stderr, "[%s] Mapping statistics for single-end reads\n", __func__);
+	fprintf(stderr, "    # records          %ld\n", v->n);
+	fprintf(stderr, "    # unmap            %d ~ %.3f %%\n", unmap_n, 100.0 * unmap_n / v->n);
+	fprintf(stderr, "    # secondary        %d ~ %.3f %%\n", sec_n, 100.0 * sec_n / v->n);
+	fprintf(stderr, "    # supplementary    %d ~ %.3f %%\n", sup_n, 100.0 * sup_n / v->n);
+	fprintf(stderr, "    # primary          %d ~ %.3f %%\n", pri_n, 100.0 * pri_n / v->n);
+}
+
+static void statistics2(const sam_core1_v *v1, const sam_core1_v *v2) {
+	int i;
+	int unmap1_n = 0,  both_map1 = 0;
+	int sec1_n = 0, pri1_n = 0, sup1_n = 0;
+	for(i = 0; i < v1->n; ++i) {
+		const sam_core1_t *r = &v1->a[i];
+		if(unmap(r->flag)) ++unmap1_n;
+		if(both_ali(r->flag)) ++both_map1;
+		if(sec_ali(r->flag)) ++sec1_n;
+		if(sup_ali(r->flag)) ++sup1_n;
+		if(!sec_ali(r->flag) && !sup_ali(r->flag)) ++pri1_n;
+	}
+
+	int unmap2_n = 0, both_map2 = 0;
+	int sec2_n = 0, pri2_n = 0, sup2_n = 0;
+	for(i = 0; i < v2->n; ++i) {
+		const sam_core1_t *r = &v2->a[i];
+		if(unmap(r->flag)) ++unmap2_n;
+		if(both_ali(r->flag)) ++both_map2;
+		if(sec_ali(r->flag)) ++sec2_n;
+		if(sup_ali(r->flag)) ++sup2_n;
+		if(!sec_ali(r->flag) && !sup_ali(r->flag)) ++pri2_n;
+	}
+	assert(both_map1 == both_map2);
+
+	fprintf(stderr, "[%s] Mapping statistics for single-end reads\n", __func__);
+	fprintf(stderr, "    READ1\n");
+	fprintf(stderr, "        # records          %ld\n", v1->n);
+	fprintf(stderr, "        # unmap            %d ~ %.3f %%\n", unmap1_n, 100.0 * unmap1_n / v1->n);
+	fprintf(stderr, "        # secondary        %d ~ %.3f %%\n", sec1_n, 100.0 * sec1_n / v1->n);
+	fprintf(stderr, "        # supplementary    %d ~ %.3f %%\n", sup1_n, 100.0 * sup1_n / v1->n);
+	fprintf(stderr, "        # primary          %d ~ %.3f %%\n", pri1_n, 100.0 * pri1_n / v1->n);
+	fprintf(stderr, "    READ2\n");
+	fprintf(stderr, "        # records          %ld\n", v2->n);
+	fprintf(stderr, "        # unmap            %d ~ %.3f %%\n", unmap2_n, 100.0 * unmap2_n / v2->n);
+	fprintf(stderr, "        # secondary        %d ~ %.3f %%\n", sec2_n, 100.0 * sec2_n / v2->n);
+	fprintf(stderr, "        # supplementary    %d ~ %.3f %%\n", sup2_n, 100.0 * sup2_n / v2->n);
+	fprintf(stderr, "        # primary          %d ~ %.3f %%\n", pri2_n, 100.0 * pri2_n / v2->n);
+}
+
+static void wgsim_evaluate1(const sam_core1_v *v) {
+	const int BWA_MEM_QF_COEF = 3; // quality filter lowerbound
+	const int POS_DIFF = 5;
+	int i, j, reads_n = 0;
+	int wrong[300], mapped[300];
+	memset(wrong, 0, sizeof(wrong));
+	memset(mapped, 0, sizeof(mapped));
+	for(i = 0; i < v->n; i++) {
+		const sam_core1_t *p = &v->a[i];
+		if(unmap(p->flag)) {
+			reads_n++;
+			continue;
+		}
+		if(sup_ali(p->flag) || sec_ali(p->flag)) continue;
+		reads_n++;
+		if(p->mapq <= BWA_MEM_QF_COEF) continue;
+		// MAPQ: [0, 255]
+		mapped[p->mapq]++;
+		int qn_len = strlen(p->qname);
+		int _cnt = 0;
+		kstring_t tmp; memset(&tmp, 0, sizeof(tmp));
+		int sim_pos1 = -1, sim_pos2 = -1;
+		for(j = 0; j < qn_len; j++) {
+			if(p->qname[j] == '_') {
+				_cnt++;
+				if(_cnt == 2) {
+					sim_pos1 = atoi(tmp.s);
+				} else if(_cnt == 3) {
+					sim_pos2 = atoi(tmp.s);
+					break;
+				}
+				tmp.l = 0;
+			} else {
+				kputc(p->qname[j], &tmp);
+			}
+		}
+		free(tmp.s);
+		sim_pos2 = sim_pos2 - strlen(p->seq) + 1;
+		if(is_rc(p->flag)) {
+			if(abs(p->pos - sim_pos2) > POS_DIFF) {
+				wrong[p->mapq]++;
+			}
+		} else {
+			if(abs(p->pos - sim_pos1) > POS_DIFF) {
+				wrong[p->mapq]++;
+			}
+		}
+	}
+	int cnt = 0;
+	for(i = 254; i > BWA_MEM_QF_COEF; i--) {
+		mapped[i] += mapped[i+1];
+		wrong[i] += wrong[i+1];
+	}
+	printf("Reads: %d , Wrong: %d , Mapped: %d\n", reads_n, wrong[BWA_MEM_QF_COEF+1], mapped[BWA_MEM_QF_COEF+1]);
+	printf("X ---- Mapped / reads_n\n");
+	for(i = BWA_MEM_QF_COEF + 1; i < 255; i++) {
+		if(mapped[i] == 0) break;
+		printf("%.9f, ", 100.0 * mapped[i] / reads_n);
+		cnt++;
+		if(cnt % 8 == 0) printf("\n");
+	}
+	printf("\n");
+
+	cnt = 0;
+	printf("Y ---- Wrong / mapped\n");
+	for(i = BWA_MEM_QF_COEF + 1; i < 255; i++) {
+		if(mapped[i] == 0) break;
+		printf("%.9f, ", 1.0 * wrong[i] / mapped[i]);
+		cnt++;
+//		printf(" >= MAPQ: %d , M: %d , W: %d    ", i, mapped[i], wrong[i]);
+		if(cnt % 8 == 0) printf("\n");
+	}
+	printf("\n");
 }
 
 int samop_main(int argc, char *argv[]) {
 	if(argc == 1) {
 		return usage();
 	}
-	int c, dedup=0, show=-1;
-	FILE *f_sam, *f_out, *f_dup;
-	f_sam = f_out = f_dup = NULL;
-	while((c=getopt(argc, argv, "s:o:dD:")) > -1) {
-		if(c == 'o') {
-			f_out = fopen(optarg, "w");
-			if(f_out == NULL) {
-				fprintf(stderr, "fail to open output SAM file %s\n", optarg);
-				return 1;
-			}
-		} else if(c == 's') {
-			show = atoi(optarg);
-		} else if(c == 'd') {
-			dedup = 1;
-		} else if(c == 'D') {
-			f_dup = fopen(optarg, "w");
-			if(f_dup == NULL) {
-				fprintf(stderr, "file to open Duplicated file %s\n", optarg);
-				return 1;
-			}
-		} else {
-			fprintf(stderr, "option error!\n");
-			return usage();
+	int c, lo_index;
+	char *in_fn = NULL;
+	const char *short_opts = "i:r:";
+	const struct option long_opts[] = {
+		// {name, has_arg, flag, val}
+		{"cov", 0, NULL, 0},
+		{"dis", 0, NULL, 0},
+		{"stat", 0, NULL, 0},
+		{"cs", 0, NULL, 0},
+		{"wgsim-eval", 0, NULL, 0},
+		{NULL, 0, NULL, 0}
+	};
+
+	int show_r = -1;
+	int cov = 0, dis = 0, cs = 0, stat = 0, wgsim_eval = 0;
+	while((c=getopt_long(argc, argv, short_opts, long_opts, &lo_index)) >= 0) {
+		switch (c) {
+			case 0:
+				if(!strcmp(long_opts[lo_index].name, "cov")) {
+					cov = 1;
+				}
+				else if(!strcmp(long_opts[lo_index].name, "cs")) {
+					cs = 1;
+				}
+				else if(!strcmp(long_opts[lo_index].name, "dis")) {
+					dis = 1;
+				}
+				else if(!strcmp(long_opts[lo_index].name, "stat")) {
+					stat = 1;
+				}
+				else if(!strcmp(long_opts[lo_index].name, "wgsim-eval")) {
+					wgsim_eval = 1;
+				}
+				break;
+			case 'i': in_fn = strdup(optarg); break;
+			case 'r': show_r = atoi(optarg); break;
+			case '?': return usage();
+			default : return usage();
 		}
 	}
-	if(f_dup != NULL) { dedup = 1; }
-	if(optind+1 >= argc || optind+2 < argc) {
-		return usage();
-	}
-	f_sam = fopen(argv[optind], "r");
-	if(f_sam == NULL) { fprintf(stderr, "[%s] failed to open [%s]\n", __func__, argv[optind]); return 1; }
+	if(in_fn == NULL) { fprintf(stderr, "input file can't be NULL\n"); return usage(); }
 
-	SAMInfo_t info = samGetInfo(f_sam);
-	samGetStatistics(&info); // 输出unmapped的统计信息
-	SAMNode_v *sams = &info.rec1;
-	if(show>=0 && show<sams->n) {
-		samShowSingle(&sams->a[show], &info.aux, stdout);
-	}
-	if(dedup == 1) {
-		samDedup(&info, f_dup);
-	}
-	if(f_out != NULL) {
-		samDump(&info, f_out);
-	}
+	FILE *fi = fopen(in_fn, "r");
+	sam_info_t info = sam_all_records(fi); // todo: load all of records costs too much memory. set a buffer instead
 
-	/* 释放SAMInfo所占空间 */
-	samDestroyInfo(&info);
-
-	/* 关闭所有文件 */
-	if(f_sam != NULL) fclose(f_sam);
-	if(f_out!= NULL) fclose(f_out);
-	if(f_dup != NULL) fclose(f_dup);
+	if(info.mode_pe == 1) {
+		if(stat) statistics2(&info.s1, &info.s2);
+		if(show_r != -1) { fprintf(stderr, "[%s] PE record [%d]\n", __func__, show_r); }
+		if(show_r >= 0 && show_r < info.s1.n) { sam_show_record1(&info.s1.a[show_r]); }
+		if(show_r >= 0 && show_r < info.s2.n) { sam_show_record1(&info.s2.a[show_r]); }
+		if(cov) coverage2(&info.s1, &info.s2, info.ref_len);
+		if(dis) distance2(&info.s1, &info.s2);
+	} else {
+		if(stat) statistics1(&info.s0);
+		if(show_r != -1) { fprintf(stderr, "[%s] SE record [%d]\n", __func__, show_r); }
+		if(show_r >= 0 && show_r < info.s0.n) { sam_show_record1(&info.s0.a[show_r]); }
+		if(cov) coverage1(&info.s0, info.ref_len);
+		if(dis) distance1(&info.s0);
+		if(wgsim_eval) wgsim_evaluate1(&info.s0);
+	}
+	sam_destroy(&info);
 	return 0;
 }
+
