@@ -1,4 +1,4 @@
-############################################# 通用编译配置 #############################################
+############################################# globel config #############################################
 CC       = gcc
 AR       = ar
 CFLAGS   =  -g -O2 -Wno-unused-function
@@ -8,9 +8,8 @@ LIBS     = -lz -lpthread
 ifeq ($(shell uname -s),Linux)
 	LIBS += -lrt
 endif
-# {CFLAGS：c编译选项} {CPPFLAGS：c++编译选项} {DFLAGS：预编译选项} {LDFLAGS：libs directory} {LIBS：libs}
 
-############################################# toy objects #############################################
+############################################# objects #############################################
 AOBJS   =   kstring.o \
 			malloc_wrap.o \
 			hfastq.o \
@@ -31,24 +30,18 @@ AOBJS   =   kstring.o \
  			chr_extract.o \
  			proc_stat.o
 
-############################################# All programs #############################################
-PROGRAMS = toy-1.1
-all: $(PROGRAMS)
+PROGRAM = toy
+all: $(PROGRAM)
 
-############################################# toy program #############################################
+############################################# dependency #############################################
 .SUFFIXES:.c .o
-
 .c.o:
 		$(CC) $(CFLAGS) $(DFLAGS) -c -o $@ $<
-
-$(PROGRAMS): $(AOBJS) main.o
+$(PROGRAM): $(AOBJS) main.o
 		$(CC) $(CFLAGS) $(DFLAGS) -o $@ $(AOBJS) main.o $(LDFLAGS) $(LIBS)
 
 ############################################# clean #############################################
 clean:
-	rm -f *.o $(PROGRAMS) *.out
-
+	rm -f *.o $(PROGRAM) *.out
 depend:
 	( LC_ALL=C ; export LC_ALL; makedepend -Y -- $(CFLAGS) $(DFLAGS) -- *.c )
-
-# DO NOT DELETE THIS LINE -- make depend depends on it.

@@ -13,6 +13,9 @@ static void usage() {
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Program:    reads2fa\n");
 	fprintf(stderr, "Usage:      generate fake fastq for reads\n");
+	fprintf(stderr, "Options:    -i input FASTQ file.\n");
+	fprintf(stderr, "            -r input reads file.\n");
+	fprintf(stderr, "            -a output FASTA file.\n");
 	fprintf(stderr, "\n");
 }
 

@@ -1,2 +1,0 @@
-
-* add FASTQ/FASTQ reader
