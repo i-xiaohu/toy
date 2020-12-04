@@ -59,6 +59,7 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "[%s] unrecognized command '%s'\n", __func__, argv[1]);
 		return 1;
 	}
+	if(ret !=  0) return ret;
 	fprintf(stderr, "[%s] CMD:", __func__);
 	for (i = 0; i < argc; ++i)
 		fprintf(stderr, " %s", argv[i]);

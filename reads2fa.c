@@ -5,14 +5,11 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
-#include <zlib.h>
-#include "sync_pe.h"
-#include "kseq.h"
 
 static void usage() {
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Program:    reads2fa\n");
-	fprintf(stderr, "Usage:      generate fake fastq for reads\n");
+	fprintf(stderr, "Usage:      generate fake fastq for decompressed reads\n");
 	fprintf(stderr, "Options:    -i input FASTQ file.\n");
 	fprintf(stderr, "            -r input reads file.\n");
 	fprintf(stderr, "            -a output FASTA file.\n");
