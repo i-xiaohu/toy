@@ -1,5 +1,5 @@
 //
-// Created by 63175 on 2019/9/19.
+// Created by ixiaohu on 2019/9/19.
 //
 
 #include <getopt.h>
@@ -18,14 +18,11 @@ static int usage() {
 	fprintf(stderr, "Usage:      samop [options] <in.sam>\n");
 	fprintf(stderr, "\n");
 	fprintf(stderr, "            -i STR        input SAM filename\n");
-//	fprintf(stderr, "            -o STR        output SAM filename\n");
 	fprintf(stderr, "            -r INT        show a (pair of) SAM record\n");
 	fprintf(stderr, "            --stat        the statistics of SAM reads\n");
 	fprintf(stderr, "            --wgsim-eval  \n");
 	fprintf(stderr, "            --cov         the coverage of mapped reads\n");
 	fprintf(stderr, "            --dis         the average distance of mapped reads\n");
-//	fprintf(stderr, "            --pri         discard supplementary and secondary alignments, only keep unmapped and primary hits.\n");
-//	fprintf(stderr, "            --cs          consensus sequences built from coordinate-sorted reads\n");
 	fprintf(stderr, "\n");
 	return 1;
 }
@@ -403,8 +400,6 @@ static void statistics2(const sam_core1_v *v1, const sam_core1_v *v2) {
 }
 
 static void wgsim_evaluate1(const sam_core1_v *v) {
-	const int BWA_MEM_QF_COEF = 3; // quality filter lowerbound
-	const int POS_DIFF = 5;
 	int i, j, reads_n = 0;
 	int wrong[300], mapped[300];
 	memset(wrong, 0, sizeof(wrong));
@@ -415,66 +410,43 @@ static void wgsim_evaluate1(const sam_core1_v *v) {
 			reads_n++;
 			continue;
 		}
-		if(sup_ali(p->flag) || sec_ali(p->flag)) continue;
-		reads_n++;
-		if(p->mapq <= BWA_MEM_QF_COEF) continue;
-		// MAPQ: [0, 255]
+		// todo: Remove this block and wgsim_eval function.
+		if(sup_ali(p->flag) || sec_ali(p->flag)) continue; // Only primary alignments are evaluated
+		reads_n++; // Each read only has one primary alignment.
 		mapped[p->mapq]++;
-		int qn_len = strlen(p->qname);
-		int _cnt = 0;
-		kstring_t tmp; memset(&tmp, 0, sizeof(tmp));
-		int sim_pos1 = -1, sim_pos2 = -1;
-		for(j = 0; j < qn_len; j++) {
-			if(p->qname[j] == '_') {
-				_cnt++;
-				if(_cnt == 2) {
-					sim_pos1 = atoi(tmp.s);
-				} else if(_cnt == 3) {
-					sim_pos2 = atoi(tmp.s);
-					break;
-				}
-				tmp.l = 0;
-			} else {
-				kputc(p->qname[j], &tmp);
-			}
+		// Extract the simulated position from query name in format 'rname_read1Pos_read2Pos'
+		char rname[64]; memset(rname, 0, sizeof(rname));
+		for(j=0; p->qname[j]!='_'; j++) {
+			rname[j] = p->qname[j];
+
 		}
-		free(tmp.s);
-		sim_pos2 = sim_pos2 - strlen(p->seq) + 1;
+		int sim_pos1 = 0, sim_pos2 = 0;
+		for(j=j+1; p->qname[j]!='_'; j++) {
+			sim_pos1 *= 10; sim_pos1 += p->qname[j]-'0';
+		}
+		for(j=j+1; p->qname[j]!='_'; j++) {
+			sim_pos2 *= 10; sim_pos2 += p->qname[j]-'0';
+		}
+		int qlen = strlen(p->seq);
+		sim_pos2 = sim_pos2 - qlen + 1; // Correct the read2Pos on the forward strand.
+		// Wrong if diff > len/10 bp.
 		if(is_rc(p->flag)) {
-			if(abs(p->pos - sim_pos2) > POS_DIFF) {
+			if(abs(p->pos - sim_pos2) > qlen / 10) {
 				wrong[p->mapq]++;
 			}
 		} else {
-			if(abs(p->pos - sim_pos1) > POS_DIFF) {
+			if(abs(p->pos - sim_pos1) > qlen / 10) {
 				wrong[p->mapq]++;
 			}
 		}
 	}
-	int cnt = 0;
-	for(i = 254; i > BWA_MEM_QF_COEF; i--) {
-		mapped[i] += mapped[i+1];
-		wrong[i] += wrong[i+1];
-	}
-	printf("Reads: %d , Wrong: %d , Mapped: %d\n", reads_n, wrong[BWA_MEM_QF_COEF+1], mapped[BWA_MEM_QF_COEF+1]);
-	printf("X ---- Mapped / reads_n\n");
-	for(i = BWA_MEM_QF_COEF + 1; i < 255; i++) {
-		if(mapped[i] == 0) break;
-		printf("%.9f, ", 100.0 * mapped[i] / reads_n);
-		cnt++;
-		if(cnt % 8 == 0) printf("\n");
-	}
-	printf("\n");
 
-	cnt = 0;
-	printf("Y ---- Wrong / mapped\n");
-	for(i = BWA_MEM_QF_COEF + 1; i < 255; i++) {
-		if(mapped[i] == 0) break;
-		printf("%.9f, ", 1.0 * wrong[i] / mapped[i]);
-		cnt++;
-//		printf(" >= MAPQ: %d , M: %d , W: %d    ", i, mapped[i], wrong[i]);
-		if(cnt % 8 == 0) printf("\n");
+	// mapq is in [0, 255]
+	fprintf(stderr, "#Reads: %d\n", reads_n);
+	for(i = 0; i <= 255; i++) {
+		if(mapped[i] == 0) continue;
+		fprintf(stderr, "{mapq,wrong,mapped}: {%d, %d, %d}\n", i, wrong[i], mapped[i]);
 	}
-	printf("\n");
 }
 
 int samop_main(int argc, char *argv[]) {
@@ -489,21 +461,17 @@ int samop_main(int argc, char *argv[]) {
 		{"cov", 0, NULL, 0},
 		{"dis", 0, NULL, 0},
 		{"stat", 0, NULL, 0},
-		{"cs", 0, NULL, 0},
 		{"wgsim-eval", 0, NULL, 0},
 		{NULL, 0, NULL, 0}
 	};
 
 	int show_r = -1;
-	int cov = 0, dis = 0, cs = 0, stat = 0, wgsim_eval = 0;
+	int cov = 0, dis = 0, stat = 0, wgsim_eval = 0;
 	while((c=getopt_long(argc, argv, short_opts, long_opts, &lo_index)) >= 0) {
 		switch (c) {
 			case 0:
 				if(!strcmp(long_opts[lo_index].name, "cov")) {
 					cov = 1;
-				}
-				else if(!strcmp(long_opts[lo_index].name, "cs")) {
-					cs = 1;
 				}
 				else if(!strcmp(long_opts[lo_index].name, "dis")) {
 					dis = 1;

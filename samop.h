@@ -34,7 +34,7 @@ static inline int pcr(int flag) { return ((flag & SAMF_PCR) != 0); }
 static inline int sup_ali(int flag) { return ((flag & SAMF_SUP_ALI) != 0); }
 
 typedef struct {
-	int nm; // # mismatches
+	int nm; // edit distance
 	int as; // alignment score
 } sam_opt_t;
 
@@ -52,7 +52,7 @@ typedef struct {
 	char *seq;
 	char *qual;
 	sam_opt_t opt;
-	char *data;
+	char *data; // All fields are allocated in one memory chunk.
 	// todo: get options
 } sam_core1_t;
 typedef kvec_t(sam_core1_t) sam_core1_v;
@@ -93,27 +93,48 @@ typedef struct {
 extern "C" {
 #endif
 
-	sam_info_t sam_all_records(FILE *f);
-	void sam_destroy(sam_info_t *info);
-	void sam_header(const char *line, int len, sam_hdr_t *h);
-	void sam_record1(const char *line, int len, sam_core1_t *r);
-	void sam_show_header(sam_hdr_t *h);
-	static inline void sam_show_record1(sam_core1_t *r) {
-		fprintf(stderr, "    RNAME    %s\n", r->qname);
-		fprintf(stderr, "    FLAG     %d\n", r->flag);
-		fprintf(stderr, "    RNAME    %s\n", r->rname);
-		fprintf(stderr, "    POS      %d\n", r->pos);
-		fprintf(stderr, "    MAPQ     %d\n", r->mapq);
-		fprintf(stderr, "    CIGAR    %s\n", r->cigar);
-		fprintf(stderr, "    RNEXT    %s\n", r->rnext);
-		fprintf(stderr, "    PNEXT    %d\n", r->pnext);
-		fprintf(stderr, "    TLEN     %d\n", r->tlen);
-		fprintf(stderr, "    SEQ      %s\n", r->seq);
-		fprintf(stderr, "    QUAL     %s\n", r->qual);
-		fprintf(stderr, "\n");
-	}
+/**
+ * Load all SAM records from $f.
+ * @param f
+ * @return SAM header and record vectors of read1 and read2.
+ */
+sam_info_t sam_all_records(FILE *f);
 
-	void sam_show_info(sam_info_t *info);
+void sam_destroy(sam_info_t *info);
+
+/**
+ * Extract the SAM-header from a SAM head line.
+ * @param line SAM head line.
+ * @param len The length of $line.
+ * @param h Returned header.
+ */
+void sam_header(const char *line, int len, sam_hdr_t *h);
+
+/**
+ * Extract the SAM-record from a SAM line.
+ * @param line SAM line.
+ * @param len The length of $line.
+ * @param r Returned record.
+ */
+void sam_record1(const char *line, int len, sam_core1_t *r);
+
+void sam_show_header(sam_hdr_t *h);
+static inline void sam_show_record1(sam_core1_t *r) {
+	fprintf(stderr, "    RNAME    %s\n", r->qname);
+	fprintf(stderr, "    FLAG     %d\n", r->flag);
+	fprintf(stderr, "    RNAME    %s\n", r->rname);
+	fprintf(stderr, "    POS      %d\n", r->pos);
+	fprintf(stderr, "    MAPQ     %d\n", r->mapq);
+	fprintf(stderr, "    CIGAR    %s\n", r->cigar);
+	fprintf(stderr, "    RNEXT    %s\n", r->rnext);
+	fprintf(stderr, "    PNEXT    %d\n", r->pnext);
+	fprintf(stderr, "    TLEN     %d\n", r->tlen);
+	fprintf(stderr, "    SEQ      %s\n", r->seq);
+	fprintf(stderr, "    QUAL     %s\n", r->qual);
+	fprintf(stderr, "\n");
+}
+
+void sam_show_info(sam_info_t *info);
 
 #ifdef __cplusplus
 }

@@ -16,6 +16,7 @@ int hsfq_main(int argc, char *argv[]);
 int spring_reorder_main(int argc, char *argv[]);
 int chr_ext_main(int argc, char **argv);
 int proc_stat_main(int argc, char *argv[]);
+int weval_main(int argc, char *argv[]);
 
 static void show_commands() {
 	fprintf(stderr, "\n");
@@ -33,6 +34,7 @@ static void show_commands() {
 	fprintf(stderr, "         reorder       recover reordered FASTQ file by Spring/HARC\n");
 	fprintf(stderr, "         chr-ext       extract one chromosome\n");
 	fprintf(stderr, "         proc-stat     status of process\n");
+	fprintf(stderr, "         weval         evaluate the SAM file of wgsim reads\n");
 	fprintf(stderr, "\n");
 }
 
@@ -55,6 +57,7 @@ int main(int argc, char *argv[]) {
 	else if(strcmp(argv[1], "reorder") == 0)     ret = spring_reorder_main(argc-1, argv+1);
 	else if(strcmp(argv[1], "chr-ext") == 0)     ret = chr_ext_main(argc-1, argv+1);
 	else if(strcmp(argv[1], "proc-stat") == 0)   ret = proc_stat_main(argc-1, argv+1);
+	else if(strcmp(argv[1], "weval") == 0)       ret = weval_main(argc-1, argv+1);
 	else {
 		fprintf(stderr, "[%s] unrecognized command '%s'\n", __func__, argv[1]);
 		return 1;

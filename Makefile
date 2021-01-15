@@ -28,7 +28,8 @@ AOBJS   =   kstring.o \
  			generate_cs.o \
  			reads2fa.o \
  			chr_extract.o \
- 			proc_stat.o
+ 			proc_stat.o \
+ 			wgsim_eval.o
 
 PROGRAM = toy
 all: $(PROGRAM)
