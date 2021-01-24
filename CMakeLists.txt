@@ -29,4 +29,5 @@ add_executable(toy
 		table.h
 		utils.c
 		utils.h
-		wgsim_eval.c)
+		wgsim_eval.c
+		view_ref.c hfastq.h)

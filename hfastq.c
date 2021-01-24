@@ -10,7 +10,7 @@
 #include <getopt.h>
 #include <zlib.h>
 
-#include "kseq.h"
+#include "hfastq.h"
 #include "utils.h"
 #include "progress.h"
 #include "table.h"
@@ -29,13 +29,33 @@ static int usage() {
 	return 1;
 }
 
-KSEQ_DECLARE(gzFile)
+void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_data, int n_steps);
+
+/** Open FASTQ file and input sequences */
+
 void *kopen(const char *fn, int *_fd);
 int kclose(void *a);
 
-void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_data, int n_steps);
+open_fastq_t* hfastq_open(const char *fn) {
+	open_fastq_t *of = calloc(1, sizeof(open_fastq_t));
+	of->ko = kopen(fn, &of->fd);
+	if (of->ko == 0) {
+		fprintf(stderr, "[E::%s] fail to open file `%s'.\n", __func__, fn);
+		free(of);
+		return NULL;
+	}
+	of->fp = gzdopen(of->fd, "r");
+	of->ks = kseq_init(of->fp);
+	return of;
+}
 
-/** Reading FASTQ sequences from bwa.h */
+void hfastq_close(open_fastq_t *p) {
+	kseq_destroy(p->ks);
+	gzclose(p->fp);
+	kclose(p->ko);
+	free(p);
+}
+
 typedef struct {
 	int l_seq, id;
 	char *name, *comment, *seq, *qual, *sam;
@@ -246,8 +266,7 @@ int hfastq_main(int argc, char **argv) {
 	int c;
 	opt_t *opt = opt_init();
 	ktp_aux_t aux; aux_init(&aux);
-	int fd1 = 0; gzFile fp1 = 0; void *ko1 = NULL;
-	int fd2 = 0; gzFile fp2 = 0; void *ko2 = NULL;
+	open_fastq_t *of1 = NULL, *of2 = NULL;
 	while((c=getopt(argc, argv, "K:")) >= 0) {
 		if (c == 'K') {
 			opt->chunk_size = atoi(optarg);
@@ -258,12 +277,14 @@ int hfastq_main(int argc, char **argv) {
 	if(optind != argc-1 && optind != argc-2) {
 		return usage();
 	}
-	ko1 = kopen(argv[optind], &fd1);
-	fp1 = gzdopen(fd1, "r"); aux.ks1 = kseq_init(fp1); aux.f1_size = get_file_size(fd1);
+	of1 = hfastq_open(argv[optind]);
+	if(of1 == NULL) return 1;
+	aux.ks1 = of1->ks; aux.f1_size = get_file_size(of1->fd);
 	if(strstr(argv[optind], ".gz")) opt->show_bar = 0;
 	if(optind == argc-2) {
-		ko2 = kopen(argv[optind + 1], &fd2);
-		fp2 = gzdopen(fd2, "r"); aux.ks2 = kseq_init(fp2); aux.f2_size = get_file_size(fd2);
+		of2 = hfastq_open(argv[optind + 1]);
+		if(of2 == NULL) return 1;
+		aux.ks2 = of2->ks; aux.f2_size = get_file_size(of2->fd);
 		if(strstr(argv[optind + 1], ".gz")) opt->show_bar = 0;
 	}
 	aux.opt = opt;
@@ -274,9 +295,9 @@ int hfastq_main(int argc, char **argv) {
 	if(aux.ks2) output_seqs_info(&aux.seqs1_info);
 
 	aux_detroy(&aux);
-	kseq_destroy(aux.ks1); gzclose(fp1); kclose(ko1);
-	if(ko2 != NULL) {
-		kseq_destroy(aux.ks2); gzclose(fp2); kclose(ko2);
+	hfastq_close(of1);
+	if(of2 != NULL) {
+		hfastq_close(of2);
 	}
 	free(opt);
 	return 0;

@@ -239,8 +239,11 @@ typedef struct __kstring_t {
 	__KSEQ_BASIC(SCOPE, type_t)					\
 	__KSEQ_READ(SCOPE)
 
+/** KSEQ_INIT generates static functions. */
 #define KSEQ_INIT(type_t, __read) KSEQ_INIT2(static, type_t, __read)
 
+/** Usage: Add "KSEQ_INIT2(, gzFile, gzread)" into utils.c to generate the entities of functions.
+ *  Call the entities with "KSEQ_DECLARE(gzFile)" in **source** file. */
 #define KSEQ_DECLARE(type_t) \
 	__KS_TYPE(type_t) \
 	__KSEQ_TYPE(type_t) \
