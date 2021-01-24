@@ -12,7 +12,6 @@
 
 #include "kseq.h"
 #include "utils.h"
-#include "sync_pe.h"
 #include "progress.h"
 #include "table.h"
 
@@ -36,6 +35,60 @@ int kclose(void *a);
 
 void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_data, int n_steps);
 
+/** Reading FASTQ sequences from bwa.h */
+typedef struct {
+	int l_seq, id;
+	char *name, *comment, *seq, *qual, *sam;
+} bseq1_t;
+
+static inline void trim_readno(kstring_t *s)
+{
+	if (s->l > 2 && s->s[s->l-2] == '/' && isdigit(s->s[s->l-1]))
+		s->l -= 2, s->s[s->l] = 0;
+}
+
+static inline char *dupkstring(const kstring_t *str, int dupempty)
+{
+	char *s = (str->l > 0 || dupempty)? malloc(str->l + 1) : NULL;
+	if (!s) return NULL;
+
+	memcpy(s, str->s, str->l);
+	s[str->l] = '\0';
+	return s;
+}
+
+static inline void kseq2bseq1(const kseq_t *ks, bseq1_t *s)
+{
+	s->name = dupkstring(&ks->name, 1);
+	s->comment = dupkstring(&ks->comment, 0);
+	s->seq = dupkstring(&ks->seq, 1);
+	s->qual = dupkstring(&ks->qual, 0);
+	s->l_seq = ks->seq.l;
+}
+
+bseq1_t *bseq_read1(int chunk_size, int *n_, long *bytes_, void *ks_){
+	kseq_t *ks = (kseq_t*)ks_;
+	int size = 0, m = 0, n = 0;
+	bseq1_t *seqs = NULL;
+	long bytes = 0;
+	while ((bytes = kseq_read(ks)) >= 0) {
+		if (n >= m) {
+			m = m? m<<1 : 256;
+			seqs = realloc(seqs, m * sizeof(bseq1_t));
+		}
+		trim_readno(&ks->name);
+		kseq2bseq1(ks, &seqs[n]);
+		seqs[n].id = n;
+		size += seqs[n++].l_seq;
+		if (chunk_size != -1 && size >= chunk_size && (n&1) == 0) break;
+	}
+	*bytes_ = bytes;
+	*n_ = n;
+
+	return seqs;
+}
+
+/** sequences statistics */
 typedef struct {
 	int seqs_n;
 	int min_l, max_l, reads_N;
@@ -89,10 +142,6 @@ static int compare_pe_qname(const char *s1, const char *s2) {
 	}
 	return 1;
 }
-
-/************************
- * sequences statistics *
- ************************/
 
 static void seqs_info(seqs_info_t *s, int n, bseq1_t *seqs) {
 	s->seqs_n += n;

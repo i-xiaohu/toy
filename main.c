@@ -6,7 +6,6 @@
 
 int hfastq_main(int argc, char **argv);
 int samop_main(int argc, char *argv[]);
-int check2Files_main(int argc, char *argv[]);
 int reads2fa_main(int argc, char **argv);
 int multiThread_main(int argc, char *argv[]);
 int sam2sortfq_main(int argc, char *argv[]);

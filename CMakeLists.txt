@@ -6,12 +6,8 @@ set(CMAKE_C_STANDARD 11)
 include_directories(.)
 
 add_executable(toy
-		check2Files.c
 		chr_extract.c
-		eva2sam.c
-		generate_cs.c
 		hfastq.c
-		hsfq.c
 		kopen.c
 		kseq.h
 		ksort.h
@@ -22,7 +18,6 @@ add_executable(toy
 		main.c
 		malloc_wrap.c
 		malloc_wrap.h
-		parallel_test.c
 		proc_stat.c
 		progress.c
 		progress.h
@@ -30,9 +25,8 @@ add_executable(toy
 		sam2sfq.c
 		samop.c
 		samop.h
-		sync_pe.c
-		sync_pe.h
 		table.c
 		table.h
 		utils.c
-		utils.h)
+		utils.h
+		wgsim_eval.c)
