@@ -10,8 +10,9 @@ int reads2fa_main(int argc, char **argv);
 int chr_ext_main(int argc, char **argv);
 int proc_stat_main(int argc, char *argv[]);
 int weval_main(int argc, char *argv[]);
+int view_ref_main(int argc, char **argv);
 
-static void show_commands() {
+static void usage() {
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Program: toy (A toy wrote by ixiaohu)\n");
 	fprintf(stderr, "Usage:   toy <command> [options]\n\n");
@@ -23,6 +24,7 @@ static void show_commands() {
 	fprintf(stderr, "    [5] chr-ext       extract one chromosome\n");
 	fprintf(stderr, "    [6] proc-stat     status of process\n");
 	fprintf(stderr, "    [7] weval         evaluate the SAM file of wgsim reads\n");
+	fprintf(stderr, "    [8] view-ref      view reference sequence\n");
 	fprintf(stderr, "\n");
 }
 
@@ -30,7 +32,7 @@ int main(int argc, char *argv[]) {
 	int i, ret;
 	double t_real = realtime();
 	if(argc == 1) {
-		show_commands();
+		usage();
 		return 0;
 	}
 	if     (strcmp(argv[1], "hfastq") == 0)      ret = hfastq_main(argc - 1, argv + 1);
@@ -40,6 +42,7 @@ int main(int argc, char *argv[]) {
 	else if(strcmp(argv[1], "chr-ext") == 0)     ret = chr_ext_main(argc-1, argv+1);
 	else if(strcmp(argv[1], "proc-stat") == 0)   ret = proc_stat_main(argc-1, argv+1);
 	else if(strcmp(argv[1], "weval") == 0)       ret = weval_main(argc-1, argv+1);
+	else if(strcmp(argv[1], "view-ref") == 0)    ret = view_ref_main(argc-1, argv+1);
 	else {
 		fprintf(stderr, "[%s] unrecognized command '%s'\n", __func__, argv[1]);
 		return 1;

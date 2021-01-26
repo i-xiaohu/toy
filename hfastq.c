@@ -56,11 +56,6 @@ void hfastq_close(open_fastq_t *p) {
 	free(p);
 }
 
-typedef struct {
-	int l_seq, id;
-	char *name, *comment, *seq, *qual, *sam;
-} bseq1_t;
-
 static inline void trim_readno(kstring_t *s)
 {
 	if (s->l > 2 && s->s[s->l-2] == '/' && isdigit(s->s[s->l-1]))
@@ -84,6 +79,15 @@ static inline void kseq2bseq1(const kseq_t *ks, bseq1_t *s)
 	s->seq = dupkstring(&ks->seq, 1);
 	s->qual = dupkstring(&ks->qual, 0);
 	s->l_seq = ks->seq.l;
+}
+
+bseq1_t hfastq_fetch1(kseq_t *ks) {
+	bseq1_t seq;
+	memset(&seq, 0, sizeof(seq));
+	if(kseq_read(ks) < 0) return seq;
+	trim_readno(&ks->name);
+	kseq2bseq1(ks, &seq);
+	return seq;
 }
 
 bseq1_t *bseq_read1(int chunk_size, int *n_, long *bytes_, void *ks_){
@@ -154,14 +158,6 @@ typedef struct {
 	int n_seqs1, n_seqs2;
 	bseq1_t *seqs1, *seqs2;
 } ktp_data_t;
-
-static int compare_pe_qname(const char *s1, const char *s2) {
-	int i;
-	for(i = 0; s1[i] != '/' && s1[i] != '\0'; ++i) {
-		if(s1[i] != s2[i]) { return 0; }
-	}
-	return 1;
-}
 
 static void seqs_info(seqs_info_t *s, int n, bseq1_t *seqs) {
 	s->seqs_n += n;
