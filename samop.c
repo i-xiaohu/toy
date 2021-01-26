@@ -10,19 +10,13 @@
 #include "samop.h"
 #include "utils.h"
 #include "ksort.h"
-#include "kstring.h"
 
 static int usage() {
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Program:    samop handle SAM file\n");
 	fprintf(stderr, "Usage:      samop [options] <in.sam>\n");
 	fprintf(stderr, "\n");
-	fprintf(stderr, "            -i STR        input SAM filename\n");
-	fprintf(stderr, "            -r INT        show a (pair of) SAM record\n");
-	fprintf(stderr, "            --stat        the statistics of SAM reads\n");
-	fprintf(stderr, "            --wgsim-eval  \n");
-	fprintf(stderr, "            --cov         the coverage of mapped reads\n");
-	fprintf(stderr, "            --dis         the average distance of mapped reads\n");
+	fprintf(stderr, "    -r INT  Show a (pair of) SAM record\n");
 	fprintf(stderr, "\n");
 	return 1;
 }
@@ -198,55 +192,6 @@ sam_info_t sam_all_records(FILE *f) {
 	return info;
 }
 
-static void coverage1(const sam_core1_v *s, long ref_l) {
-	int i;
-	long bases = 0;
-	for(i = 0; i < s->n; ++i) {
-		const sam_core1_t *p = &s->a[i];
-		if(!unmap(p->flag)) {
-			bases += strlen(p->seq);
-		}
-	}
-	fprintf(stderr, "[%s] %ld bases, %ld reference, ~%.3f coverage\n", __func__, bases, ref_l, 1.0 * bases / ref_l);
-}
-
-static void coverage2(const sam_core1_v *s1, const sam_core1_v *s2, long ref_l) {
-	int i;
-	long bases = 0;
-	for(i = 0; i < s1->n; ++i) {
-		const sam_core1_t *p = &s1->a[i];
-		if(!unmap(p->flag)) {
-			bases += strlen(p->seq);
-		}
-	}
-	for(i = 0; i < s2->n; ++i) {
-		const sam_core1_t *p = &s2->a[i];
-		if(!unmap(p->flag)) {
-			bases += strlen(p->seq);
-		}
-	}
-	fprintf(stderr, "[%s] %ld bases, %ld reference, ~%.3f coverage\n", __func__, bases, ref_l, 1.0 * bases / ref_l);
-}
-
-static int get_dis(const sam_core1_t *s1, const sam_core1_t *s2) {
-	if(strcmp(s1->rname, s2->rname) != 0) {
-		return -1;
-	} else {
-		assert(s2->pos >= s1->pos);
-		return s2->pos - s1->pos;
-	}
-}
-
-static int get_mis(const char *s1, const char *s2, int d) {
-	int i, ret = 0, len1 = strlen(s1), len2 = strlen(s2);
-	for(i = 0; i < len2 && i+d < len1; ++i) {
-		if(s1[i + d] != s2[i]) {
-			++ret;
-		}
-	}
-	return ret;
-}
-
 void sam_destroy(sam_info_t *info) {
 	sam_hdr_t *h = &info->header;
 	int i;
@@ -277,69 +222,6 @@ void sam_destroy(sam_info_t *info) {
 	}
 }
 
-#define dis_lt(a, b) (strcmp((a).rname,(b).rname) != 0 ?strcmp((a).rname, (b).rname) < 0 :(a).pos < (b).pos)
-KSORT_INIT(dis, sam_core1_t, dis_lt)
-static void distance2(const sam_core1_v *s1, const sam_core1_v *s2) {
-	sam_core1_v s; kv_init(s);
-	s.m = s1->n + s2->n;
-	s.a = malloc(s.m * sizeof(sam_core1_t));
-	int i;
-	for(i = 0; i < s1->n; ++i) {
-		const sam_core1_t *p = &s1->a[i];
-		if(unmap(p->flag) || sec_ali(p->flag) || sup_ali(p->flag)) {
-			continue;
-		}
-		kv_push(sam_core1_t, s, *p);
-	}
-	for(i = 0; i < s2->n; ++i) {
-		const sam_core1_t *p = &s2->a[i];
-		if(unmap(p->flag) || sec_ali(p->flag) || sup_ali(p->flag)) {
-			continue;
-		}
-		kv_push(sam_core1_t, s, *p);
-	}
-	ks_introsort(dis, s.n, s.a);
-	long all_d = 0, cnt = 0, mis = 0;
-	for(i = 1; i < s.n; ++i) {
-		int d = get_dis(&s.a[i-1], &s.a[i]);
-		if(d != -1) {
-			all_d += d;
-			++cnt;
-			mis += get_mis(s.a[i-1].seq, s.a[i].seq, d);
-		}
-	}
-	fprintf(stderr, "[%s] Average distance between contiguous reads: %.3f\n", __func__, 1.0 * all_d / cnt);
-	fprintf(stderr, "    average mismatches between contiguous reads: %.3f\n", 1.0 * mis / cnt);
-	free(s.a);
-}
-
-static void distance1(const sam_core1_v *s1) {
-	sam_core1_v s; kv_init(s);
-	s.m = s1->n;
-	s.a = malloc(s.m * sizeof(sam_core1_t));
-	int i;
-	for(i = 0; i < s1->n; ++i) {
-		const sam_core1_t *p = &s1->a[i];
-		if(unmap(p->flag) || sec_ali(p->flag) || sup_ali(p->flag)) {
-			continue;
-		}
-		kv_push(sam_core1_t, s, *p);
-	}
-	ks_introsort(dis, s.n, s.a);
-	long all_d = 0, cnt = 0, mis = 0;
-	for(i = 1; i < s.n; ++i) {
-		int d = get_dis(&s.a[i-1], &s.a[i]);
-		if(d != -1) {
-			all_d += d;
-			++cnt;
-			mis += get_mis(s.a[i-1].seq, s.a[i].seq, d);
-		}
-	}
-	fprintf(stderr, "[%s] Average distance between contiguous reads: %.3f\n", __func__, 1.0 * all_d / cnt);
-	fprintf(stderr, "    average mismatches between contiguous reads: %.3f\n", 1.0 * mis / cnt);
-	free(s.a);
-}
-
 static void statistics1(const sam_core1_v *v) {
 	int i;
 	int unmap_n = 0;
@@ -351,163 +233,43 @@ static void statistics1(const sam_core1_v *v) {
 		if(sup_ali(r->flag)) ++sup_n;
 		if(!sec_ali(r->flag) && !sup_ali(r->flag)) ++pri_n;
 	}
-	fprintf(stderr, "[%s] Mapping statistics for single-end reads\n", __func__);
-	fprintf(stderr, "    # records          %ld\n", v->n);
-	fprintf(stderr, "    # unmap            %d ~ %.3f %%\n", unmap_n, 100.0 * unmap_n / v->n);
-	fprintf(stderr, "    # secondary        %d ~ %.3f %%\n", sec_n, 100.0 * sec_n / v->n);
-	fprintf(stderr, "    # supplementary    %d ~ %.3f %%\n", sup_n, 100.0 * sup_n / v->n);
-	fprintf(stderr, "    # primary          %d ~ %.3f %%\n", pri_n, 100.0 * pri_n / v->n);
-}
-
-static void statistics2(const sam_core1_v *v1, const sam_core1_v *v2) {
-	int i;
-	int unmap1_n = 0,  both_map1 = 0;
-	int sec1_n = 0, pri1_n = 0, sup1_n = 0;
-	for(i = 0; i < v1->n; ++i) {
-		const sam_core1_t *r = &v1->a[i];
-		if(unmap(r->flag)) ++unmap1_n;
-		if(both_ali(r->flag)) ++both_map1;
-		if(sec_ali(r->flag)) ++sec1_n;
-		if(sup_ali(r->flag)) ++sup1_n;
-		if(!sec_ali(r->flag) && !sup_ali(r->flag)) ++pri1_n;
-	}
-
-	int unmap2_n = 0, both_map2 = 0;
-	int sec2_n = 0, pri2_n = 0, sup2_n = 0;
-	for(i = 0; i < v2->n; ++i) {
-		const sam_core1_t *r = &v2->a[i];
-		if(unmap(r->flag)) ++unmap2_n;
-		if(both_ali(r->flag)) ++both_map2;
-		if(sec_ali(r->flag)) ++sec2_n;
-		if(sup_ali(r->flag)) ++sup2_n;
-		if(!sec_ali(r->flag) && !sup_ali(r->flag)) ++pri2_n;
-	}
-	assert(both_map1 == both_map2);
-
-	fprintf(stderr, "[%s] Mapping statistics for single-end reads\n", __func__);
-	fprintf(stderr, "    READ1\n");
-	fprintf(stderr, "        # records          %ld\n", v1->n);
-	fprintf(stderr, "        # unmap            %d ~ %.3f %%\n", unmap1_n, 100.0 * unmap1_n / v1->n);
-	fprintf(stderr, "        # secondary        %d ~ %.3f %%\n", sec1_n, 100.0 * sec1_n / v1->n);
-	fprintf(stderr, "        # supplementary    %d ~ %.3f %%\n", sup1_n, 100.0 * sup1_n / v1->n);
-	fprintf(stderr, "        # primary          %d ~ %.3f %%\n", pri1_n, 100.0 * pri1_n / v1->n);
-	fprintf(stderr, "    READ2\n");
-	fprintf(stderr, "        # records          %ld\n", v2->n);
-	fprintf(stderr, "        # unmap            %d ~ %.3f %%\n", unmap2_n, 100.0 * unmap2_n / v2->n);
-	fprintf(stderr, "        # secondary        %d ~ %.3f %%\n", sec2_n, 100.0 * sec2_n / v2->n);
-	fprintf(stderr, "        # supplementary    %d ~ %.3f %%\n", sup2_n, 100.0 * sup2_n / v2->n);
-	fprintf(stderr, "        # primary          %d ~ %.3f %%\n", pri2_n, 100.0 * pri2_n / v2->n);
-}
-
-static void wgsim_evaluate1(const sam_core1_v *v) {
-	int i, j, reads_n = 0;
-	int wrong[300], mapped[300];
-	memset(wrong, 0, sizeof(wrong));
-	memset(mapped, 0, sizeof(mapped));
-	for(i = 0; i < v->n; i++) {
-		const sam_core1_t *p = &v->a[i];
-		if(unmap(p->flag)) {
-			reads_n++;
-			continue;
-		}
-		// todo: Remove this block and wgsim_eval function.
-		if(sup_ali(p->flag) || sec_ali(p->flag)) continue; // Only primary alignments are evaluated
-		reads_n++; // Each read only has one primary alignment.
-		mapped[p->mapq]++;
-		// Extract the simulated position from query name in format 'rname_read1Pos_read2Pos'
-		char rname[64]; memset(rname, 0, sizeof(rname));
-		for(j=0; p->qname[j]!='_'; j++) {
-			rname[j] = p->qname[j];
-
-		}
-		int sim_pos1 = 0, sim_pos2 = 0;
-		for(j=j+1; p->qname[j]!='_'; j++) {
-			sim_pos1 *= 10; sim_pos1 += p->qname[j]-'0';
-		}
-		for(j=j+1; p->qname[j]!='_'; j++) {
-			sim_pos2 *= 10; sim_pos2 += p->qname[j]-'0';
-		}
-		int qlen = strlen(p->seq);
-		sim_pos2 = sim_pos2 - qlen + 1; // Correct the read2Pos on the forward strand.
-		// Wrong if diff > len/10 bp.
-		if(is_rc(p->flag)) {
-			if(abs(p->pos - sim_pos2) > qlen / 10) {
-				wrong[p->mapq]++;
-			}
-		} else {
-			if(abs(p->pos - sim_pos1) > qlen / 10) {
-				wrong[p->mapq]++;
-			}
-		}
-	}
-
-	// mapq is in [0, 255]
-	fprintf(stderr, "#Reads: %d\n", reads_n);
-	for(i = 0; i <= 255; i++) {
-		if(mapped[i] == 0) continue;
-		fprintf(stderr, "{mapq,wrong,mapped}: {%d, %d, %d}\n", i, wrong[i], mapped[i]);
-	}
+	fprintf(stderr, "\n");
+	fprintf(stderr, "Mapping statistics for single-end reads\n");
+	fprintf(stderr, "    #records          %ld\n", v->n);
+	fprintf(stderr, "    #unmap            %d\n", unmap_n);
+	fprintf(stderr, "    #primary          %d\n", pri_n);
+	fprintf(stderr, "    #supplementary    %d\n", sup_n);
+	fprintf(stderr, "    #secondary        %d\n", sec_n);
+	fprintf(stderr, "\n");
 }
 
 int samop_main(int argc, char *argv[]) {
 	if(argc == 1) {
 		return usage();
 	}
-	int c, lo_index;
-	char *in_fn = NULL;
-	const char *short_opts = "i:r:";
-	const struct option long_opts[] = {
-		// {name, has_arg, flag, val}
-		{"cov", 0, NULL, 0},
-		{"dis", 0, NULL, 0},
-		{"stat", 0, NULL, 0},
-		{"wgsim-eval", 0, NULL, 0},
-		{NULL, 0, NULL, 0}
-	};
 
-	int show_r = -1;
-	int cov = 0, dis = 0, stat = 0, wgsim_eval = 0;
-	while((c=getopt_long(argc, argv, short_opts, long_opts, &lo_index)) >= 0) {
-		switch (c) {
-			case 0:
-				if(!strcmp(long_opts[lo_index].name, "cov")) {
-					cov = 1;
-				}
-				else if(!strcmp(long_opts[lo_index].name, "dis")) {
-					dis = 1;
-				}
-				else if(!strcmp(long_opts[lo_index].name, "stat")) {
-					stat = 1;
-				}
-				else if(!strcmp(long_opts[lo_index].name, "wgsim-eval")) {
-					wgsim_eval = 1;
-				}
-				break;
-			case 'i': in_fn = strdup(optarg); break;
-			case 'r': show_r = atoi(optarg); break;
-			case '?': return usage();
-			default : return usage();
+	int c, show_r = -1;
+	while((c=getopt(argc, argv, "r:")) >= 0) {
+		if(c == 'r') {
+			show_r = atoi(optarg);
 		}
+		else return usage();
 	}
-	if(in_fn == NULL) { fprintf(stderr, "input file can't be NULL\n"); return usage(); }
 
-	FILE *fi = fopen(in_fn, "r");
+	if(optind != argc-1) {
+		return usage();
+	}
+
+	FILE *fi = fopen(argv[optind], "r");
 	sam_info_t info = sam_all_records(fi); // todo: load all of records costs too much memory. set a buffer instead
 
 	if(info.mode_pe == 1) {
-		if(stat) statistics2(&info.s1, &info.s2);
-		if(show_r != -1) { fprintf(stderr, "[%s] PE record [%d]\n", __func__, show_r); }
-		if(show_r >= 0 && show_r < info.s1.n) { sam_show_record1(&info.s1.a[show_r]); }
-		if(show_r >= 0 && show_r < info.s2.n) { sam_show_record1(&info.s2.a[show_r]); }
-		if(cov) coverage2(&info.s1, &info.s2, info.ref_len);
-		if(dis) distance2(&info.s1, &info.s2);
+		fprintf(stderr, "Paired-end alignments are not supportive.\n");
 	} else {
-		if(stat) statistics1(&info.s0);
-		if(show_r != -1) { fprintf(stderr, "[%s] SE record [%d]\n", __func__, show_r); }
-		if(show_r >= 0 && show_r < info.s0.n) { sam_show_record1(&info.s0.a[show_r]); }
-		if(cov) coverage1(&info.s0, info.ref_len);
-		if(dis) distance1(&info.s0);
-		if(wgsim_eval) wgsim_evaluate1(&info.s0);
+		statistics1(&info.s0);
+		if(show_r != -1) fprintf(stderr, "Show SE record [%d]\n", show_r);
+		if(show_r >= 0 && show_r < info.s0.n) sam_show_record1(&info.s0.a[show_r]);
+		else fprintf(stderr, "%d is out of the boundary.\n", show_r);
 	}
 	sam_destroy(&info);
 	return 0;
