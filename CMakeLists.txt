@@ -24,7 +24,6 @@ add_executable(toy
 		progress.c
 		progress.h
 		reads2fa.c
-		sam2sfq.c
 		samop.c
 		samop.h
 		table.c

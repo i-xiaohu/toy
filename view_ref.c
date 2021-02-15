@@ -10,7 +10,7 @@
 static int usage() {
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Program: view-ref <ref.fa>\n");
-	fprintf(stderr, "Usage: View reference online, input \"RName coordinate length\",");
+	fprintf(stderr, "Usage: View reference online, input \"RName coordinate[1-based index] length\",");
 	fprintf(stderr, " stop viewing with \"exit\".\n");
 	fprintf(stderr, "\n");
 	return 1;

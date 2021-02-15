@@ -5,7 +5,6 @@
 
 int hfastq_main(int argc, char **argv);
 int samop_main(int argc, char *argv[]);
-int sam2sortfq_main(int argc, char *argv[]);
 int reads2fa_main(int argc, char **argv);
 int chr_ext_main(int argc, char **argv);
 int proc_stat_main(int argc, char *argv[]);
@@ -19,12 +18,11 @@ static void usage() {
 	fprintf(stderr, "Command:\n");
 	fprintf(stderr, "    [1] hfastq        handle FASTQ file\n");
 	fprintf(stderr, "    [2] samop         handle SAM file\n");
-	fprintf(stderr, "    [3] sam2sfq       SAM -> C-sorted FASTQ file\n");
-	fprintf(stderr, "    [4] reads2fa      Add query name to only base reads.\n");
-	fprintf(stderr, "    [5] chr-ext       extract one chromosome\n");
-	fprintf(stderr, "    [6] proc-stat     status of process\n");
-	fprintf(stderr, "    [7] weval         evaluate the SAM file of wgsim reads\n");
-	fprintf(stderr, "    [8] view-ref      view reference sequence\n");
+	fprintf(stderr, "    [3] reads2fa      Add query name to only base reads.\n");
+	fprintf(stderr, "    [4] chr-ext       extract one chromosome\n");
+	fprintf(stderr, "    [5] proc-stat     status of process\n");
+	fprintf(stderr, "    [6] weval         evaluate the SAM file of wgsim reads\n");
+	fprintf(stderr, "    [7] view-ref      view reference sequence\n");
 	fprintf(stderr, "\n");
 }
 
@@ -37,7 +35,6 @@ int main(int argc, char *argv[]) {
 	}
 	if     (strcmp(argv[1], "hfastq") == 0)      ret = hfastq_main(argc - 1, argv + 1);
 	else if(strcmp(argv[1], "samop") == 0)       ret = samop_main(argc - 1, argv + 1);
-	else if(strcmp(argv[1], "sam2sfq") == 0)     ret = sam2sortfq_main(argc-1, argv+1);
 	else if(strcmp(argv[1], "reads2fa") == 0)    ret = reads2fa_main(argc - 1, argv + 1);
 	else if(strcmp(argv[1], "chr-ext") == 0)     ret = chr_ext_main(argc-1, argv+1);
 	else if(strcmp(argv[1], "proc-stat") == 0)   ret = proc_stat_main(argc-1, argv+1);

@@ -79,62 +79,25 @@ typedef struct {
 	PG_t pg;
 } sam_hdr_t;
 
-// SAM header and records
-typedef struct {
-	sam_hdr_t header; // SAM header
-	int mode_pe;
-	long ref_len;
-	sam_core1_v s1; // FLAG with READ1
-	sam_core1_v s2; // FLAG with READ2
-	sam_core1_v s0; // other FLAG
-} sam_info_t;
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/**
- * Load all SAM records from $f.
- * @param f
- * @return SAM header and record vectors of read1 and read2.
- */
-sam_info_t sam_all_records(FILE *f);
+	/**
+	 * Extract the SAM-header from a SAM head line.
+	 * @param line SAM head line.
+	 * @param len The length of $line.
+	 * @param h Returned header.
+	 */
+	void sam_header(const char *line, int len, sam_hdr_t *h);
 
-void sam_destroy(sam_info_t *info);
-
-/**
- * Extract the SAM-header from a SAM head line.
- * @param line SAM head line.
- * @param len The length of $line.
- * @param h Returned header.
- */
-void sam_header(const char *line, int len, sam_hdr_t *h);
-
-/**
- * Extract the SAM-record from a SAM line.
- * @param line SAM line.
- * @param len The length of $line.
- * @param r Returned record.
- */
-void sam_record1(const char *line, int len, sam_core1_t *r);
-
-void sam_show_header(sam_hdr_t *h);
-static inline void sam_show_record1(sam_core1_t *r) {
-	fprintf(stderr, "    RNAME    %s\n", r->qname);
-	fprintf(stderr, "    FLAG     %d\n", r->flag);
-	fprintf(stderr, "    RNAME    %s\n", r->rname);
-	fprintf(stderr, "    POS      %d\n", r->pos);
-	fprintf(stderr, "    MAPQ     %d\n", r->mapq);
-	fprintf(stderr, "    CIGAR    %s\n", r->cigar);
-	fprintf(stderr, "    RNEXT    %s\n", r->rnext);
-	fprintf(stderr, "    PNEXT    %d\n", r->pnext);
-	fprintf(stderr, "    TLEN     %d\n", r->tlen);
-	fprintf(stderr, "    SEQ      %s\n", r->seq);
-	fprintf(stderr, "    QUAL     %s\n", r->qual);
-	fprintf(stderr, "\n");
-}
-
-void sam_show_info(sam_info_t *info);
+	/**
+	 * Extract the SAM-record from a SAM line.
+	 * @param line SAM line.
+	 * @param len The length of $line.
+	 * @param r Returned record. Warn: r use the input memory space.
+	 */
+	void sam_record1(char *line, int len, sam_core1_t *r);
 
 #ifdef __cplusplus
 }
