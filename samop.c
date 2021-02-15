@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <zlib.h>
 
 #include "samop.h"
 
@@ -135,7 +136,7 @@ static void sam_header_free(sam_hdr_t *h) {
 	free(h->pg.ID); free(h->pg.PN); free(h->pg.VN); free(h->pg.CL);
 }
 
-static void analysis(FILE *f) {
+static void analysis(gzFile f) {
 	sam_hdr_t h; memset(&h, 0, sizeof(h));
 	char line[65536]; // for next generation sequence, 64K buffer is safe and enough.
 	sam_core1_t core;
@@ -143,7 +144,7 @@ static void analysis(FILE *f) {
 	int unmap_n = 0;
 	int sec_n = 0, pri_n = 0, sup_n = 0;
 	long as = 0, nm = 0;
-	while(fgets(line, sizeof(line), f) != NULL) {
+	while(gzgets(f, line, sizeof(line)) != NULL) {
 		int len = (int)strlen(line);
 		if(line[len-1] == '\n') { line[--len] = '\0'; }
 		if(line[0] == '@') {
@@ -179,8 +180,8 @@ static void analysis(FILE *f) {
 	fprintf(stderr, "Primary:          %d\n", pri_n);
 	fprintf(stderr, "Supplementary:    %d\n", sup_n);
 	fprintf(stderr, "Secondary:        %d\n", sec_n);
-	fprintf(stderr, "Alignment_Score   %.0f\n", 1.0 * as / pri_n);
-	fprintf(stderr, "Edit_distance     %.0f\n", 1.0 * nm / pri_n);
+	fprintf(stderr, "Alignment_Score   %.2f\n", 1.0 * as / pri_n);
+	fprintf(stderr, "Edit_distance     %.2f\n", 1.0 * nm / pri_n);
 	fprintf(stderr, "\n");
 }
 
@@ -189,9 +190,13 @@ int samop_main(int argc, char *argv[]) {
 		return usage();
 	}
 
-	FILE *fi = fopen(argv[1], "r");
+	gzFile fi = gzopen(argv[1], "r");
+	if (fi == NULL) {
+		fprintf(stderr, "Open %s failed\n", argv[1]);
+		return 1;
+	}
 	analysis(fi);
-	fclose(fi);
+	gzclose(fi);
 	return 0;
 }
 
