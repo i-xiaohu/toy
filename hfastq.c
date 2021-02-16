@@ -216,8 +216,6 @@ static void *process(void *shared, int step, void *_data) {
 			if(aux->has_read_bytes == aux->f1_size + aux->f2_size) {
 				fprintf(stderr, "\n");
 			}
-		} else {
-			fprintf(stderr, "[%s] Read %d sequences.\n", __func__, data->n_seqs1 + data->n_seqs2);
 		}
 		return data;
 	} else if(step == 2) {
