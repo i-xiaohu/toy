@@ -20,7 +20,7 @@ add_executable(toy
 		main.c
 		malloc_wrap.c
 		malloc_wrap.h
-		proc_stat.c
+		pstat.c
 		progress.c
 		progress.h
 		reads2fa.c

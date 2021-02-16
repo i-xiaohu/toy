@@ -10,11 +10,11 @@
 
 #define PNAME_LINE  1
 #define VMSIZE_LINE 13
-#define VMRSS_LINE  17
+#define VMRSS_LINE  16
 
 static int usage() {
 	fprintf(stderr, "\n");
-	fprintf(stderr, "Usage: proc-stat [options] <ID|name> \n");
+	fprintf(stderr, "Usage: pstat [options] <ID|name> \n");
 	fprintf(stderr, "Note: Stats from /proc/pid/status\n");
 	fprintf(stderr, "    -p  [INT] Process ID\n");
 	fprintf(stderr, "    -n  [STR] Process name\n");
@@ -23,49 +23,7 @@ static int usage() {
 	return 1;
 }
 
-static char* get_pname(unsigned int pid) {
-	char file_name[512], line_buff[512];
-	memset(file_name, 0, sizeof(file_name));
-	memset(line_buff, 0, sizeof(line_buff));
-	FILE *fd;
-	sprintf(file_name,"/proc/%d/status",pid);
-
-	fd = fopen(file_name, "r");
-	if(fd == NULL) return NULL;
-	int i;
-	for (i = 0; i < PNAME_LINE; i++){
-		fgets(line_buff, sizeof(line_buff), fd);
-	}
-	fclose(fd);
-
-	char name[64], pname[64];
-	sscanf(line_buff,"%s %s", name, pname);
-	char *ret = strdup(pname);
-	return ret;
-}
-
-static long get_VM(unsigned int pid){
-	char file_name[512], line_buff[512];
-	memset(file_name, 0, sizeof(file_name));
-	memset(line_buff, 0, sizeof(line_buff));
-	FILE *fd;
-	sprintf(file_name,"/proc/%d/status",pid);
-
-	fd = fopen(file_name, "r");
-	if(fd == NULL) return -1;
-	int i;
-	for (i = 0; i < VMSIZE_LINE; i++){
-		fgets(line_buff, sizeof(line_buff), fd);
-	}
-	fclose(fd);
-
-	char name[64];
-	long ret;
-	sscanf(line_buff,"%s %ld", name, &ret);
-	return ret;
-}
-
-static long get_RAM(unsigned int pid) {
+static char* get_field(int pid, int line_id) {
 	char file_name[512], line_buff[512];
 	memset(file_name, 0, sizeof(file_name));
 	memset(line_buff, 0, sizeof(line_buff));
@@ -73,16 +31,17 @@ static long get_RAM(unsigned int pid) {
 	sprintf(file_name,"/proc/%d/status",pid);
 
 	fd = fopen(file_name,"r");
-	if(fd == NULL) return -1;
+	if(fd == NULL) return NULL;
 	int i;
-	for (i = 0; i < VMRSS_LINE; i++) {
+	for (i = 0; i < line_id; i++) {
 		fgets(line_buff, sizeof(line_buff), fd);
 	}
 	fclose(fd);
 
-	char name[64];
-	long ret;
-	sscanf(line_buff,"%s %ld", name, &ret);
+	char name[64], buf[64];
+	sscanf(line_buff,"%s %s", name, buf);
+	fprintf(stderr, "%s %s\n", name, buf);
+	char *ret = strdup(buf);
 	return ret;
 }
 
@@ -101,13 +60,13 @@ static int get_pid(const char* process_name, const char* user) {
 }
 
 
-int proc_stat_main(int argc, char *argv[]) {
+int pstat_main(int argc, char *argv[]) {
 	if(argc == 1) {
 		return usage();
 	}
 	int c, delay = 3;
 
-	unsigned int pid = 0;
+	int pid = 0;
 	char *pname = NULL;
 	while((c=getopt(argc, argv, "p:n:d:")) >= 0) {
 		if (c == 'd') {
@@ -115,7 +74,7 @@ int proc_stat_main(int argc, char *argv[]) {
 		}
 		else if (c == 'p') {
 			pid = atoi(optarg);
-			pname = get_pname(pid);
+			pname = get_field(pid, PNAME_LINE);
 		}
 		else if (c == 'n') {
 			pname = strdup(optarg);
@@ -132,16 +91,23 @@ int proc_stat_main(int argc, char *argv[]) {
 	long max_RAM = 0, now_RAM;
 	long max_VM = 0, now_VM;
 	while(1) {
-		now_VM = get_VM(pid);
-		if(now_VM == -1) {
+		char* fie;
+		// Get VM
+		fie = get_field(pid, VMSIZE_LINE);
+		if(fie == NULL) {
 			fprintf(stderr, "Process [%d, %s] finished.\n", pid, pname);
 			break;
 		}
+		now_VM = atol(fie); free(fie);
 		max_VM = now_VM > max_VM ? now_VM : max_VM;
-		now_RAM = get_RAM(pid);
+
+		// Get RAM
+		fie = get_field(pid, VMRSS_LINE);
+		now_RAM = atol(fie); free(fie);
 		max_RAM = now_RAM > max_RAM ? now_RAM : max_RAM;
 		fprintf(stderr, "RAM: %.2f MB\n", 1.0 * now_RAM / 1024);
 		fprintf(stderr, "VM:  %.2f MB\n", 1.0 * now_VM / 1024);
+		fprintf(stderr, "\n");
 		sleep(delay);
 	}
 	fprintf(stderr, "Max_RAM: %.2f MB\n", 1.0 * max_RAM / 1024);
