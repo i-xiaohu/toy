@@ -101,6 +101,7 @@ static void tp_process(sam_core1_v *data, ktp_aux_t *aux) {
 		}
 		int qlen = strlen(p->seq);
 		sim_pos2 = sim_pos2 - qlen + 1; // Correct the read2Pos on the forward strand.
+		if(strcmp(rname, p->rname) != 0) continue;
 		if(!is_rc(p->flag) && abs(p->pos-sim_pos1) <= opt->dis) aux->correct[p->mapq]++;
 		if( is_rc(p->flag) && abs(p->pos-sim_pos2) <= opt->dis) aux->correct[p->mapq]++;
 	}
