@@ -13,8 +13,8 @@ int view_ref_main(int argc, char **argv);
 
 static void usage() {
 	fprintf(stderr, "\n");
-	fprintf(stderr, "Program: toy (A toy wrote by ixiaohu)\n");
-	fprintf(stderr, "Usage:   toy <command> [options]\n\n");
+	fprintf(stderr, "Program: mini_tools (A mini_tools wrote by ixiaohu)\n");
+	fprintf(stderr, "Usage:   mini_tools <command> [options]\n\n");
 	fprintf(stderr, "Command:\n");
 	fprintf(stderr, "    [1] hfastq        handle FASTQ file\n");
 	fprintf(stderr, "    [2] samop         handle SAM file\n");
