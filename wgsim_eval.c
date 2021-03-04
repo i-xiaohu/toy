@@ -6,6 +6,7 @@
 #include <getopt.h>
 #include <stdlib.h>
 #include <string.h>
+#include <zlib.h>
 
 #include "samop.h"
 
@@ -23,120 +24,75 @@ static int usage() {
 
 typedef struct {
 	int dis;
-	int lines_n;
-	FILE *f;
 } opt_t;
 
 static opt_t* opt_init() {
 	opt_t* ret = malloc(sizeof(opt_t));
 	ret->dis = 10;
-	ret->lines_n = 1000*1000; // 1M SAM lines.
-	ret->f = NULL;
 	return ret;
 }
 
-static void opt_destroy(opt_t *opt) {
-	fclose(opt->f);
-	free(opt);
-}
-
-typedef struct {
-	opt_t *opt;
-	int correct[255];
-	int align[255];
-	int miss_n; // #unmapped reads
-} ktp_aux_t;
-
-static sam_core1_v* tp_input(FILE *f, int lines_n) {
-	char line[65536]; // for next generation sequence, 64K buffer is safe and enough.
-	int cnt = 0;
-	sam_core1_v *ret = calloc(1, sizeof(sam_core1_v));
-	while (fgets(line, sizeof(line), f) != NULL) {
-		if(line[0] == '@') continue;
-		cnt++;
-		int len = strlen(line);
-		if(line[len-1] == '\n') { line[--len] = '\0'; }
-		sam_core1_t r;
-		sam_record1(line, len, &r);
-		kv_push(sam_core1_t, *ret, r);
-		if(cnt >= lines_n) break;
-	}
-	return ret;
-}
-
-static void tp_process(sam_core1_v *data, ktp_aux_t *aux) {
+static void analysis(gzFile f, const opt_t *opt) {
 	int i, j;
-	opt_t *opt = aux->opt;
-	for(i = 0; i < data->n; i++) {
-		const sam_core1_t *p = &data->a[i];
-		if(unmap(p->flag)) {
-			aux->miss_n++;
+	char line[65536];
+	int correct[255]; memset(correct, 0, sizeof(correct));
+	int align[255]; memset(align, 0, sizeof(align));
+	int miss_n = 0; // #unmapped reads
+	sam_core1_t core;
+	while(gzgets(f, line, sizeof(line)) != NULL) {
+		int len = (int)strlen(line);
+		if(line[len-1] == '\n') { line[--len] = '\0'; }
+		if(line[0] == '@') {
 			continue;
+		} else {
+			sam_record1(line, len, &core);
+			if(is_read1(core.flag) || is_read2(core.flag)) {
+				fprintf(stderr, "Paired-end alignments are not supportive.\n");
+				abort();
+			}
+			const sam_core1_t *p = &core;
+			if(unmap(p->flag)) {
+				miss_n++;
+				continue;
+			}
+			if(sec_ali(p->flag) || sup_ali(p->flag)) continue; // Only primary alignments considered.
+			align[p->mapq]++;
+			// Extract the simulated position from query name in format 'rname_read1Pos_read2Pos'
+			char rname[64]; memset(rname, 0, sizeof(rname));
+			for(j=0; p->qname[j] && p->qname[j]!='_'; j++) {
+				rname[j] = p->qname[j];
+			}
+			if(!p->qname[j]) {
+				fprintf(stderr, "Reference-name absent in wgsim read name.\n");
+				abort();
+			}
+			int sim_pos1 = 0, sim_pos2 = 0;
+			for(j=j+1; p->qname[j] && p->qname[j]!='_'; j++) {
+				sim_pos1 *= 10; sim_pos1 += p->qname[j]-'0';
+			}
+			if(!p->qname[j]) {
+				fprintf(stderr, "read1Pos absent in wgsim read name.\n");
+				abort();
+			}
+			for(j=j+1; p->qname[j] && p->qname[j]!='_'; j++) {
+				sim_pos2 *= 10; sim_pos2 += p->qname[j]-'0';
+			}
+			if(!p->qname[j]) {
+				fprintf(stderr, "read2Pos absent in wgsim read name.\n");
+				abort();
+			}
+			int qlen = strlen(p->seq);
+			sim_pos2 = sim_pos2 - qlen + 1; // Correct the read2Pos on the forward strand.
+			if(strcmp(rname, p->rname) != 0) continue;
+			if(!is_rc(p->flag) && abs(p->pos-sim_pos1) <= opt->dis) correct[p->mapq]++;
+			if( is_rc(p->flag) && abs(p->pos-sim_pos2) <= opt->dis) correct[p->mapq]++;
 		}
-		if(sec_ali(p->flag) || sup_ali(p->flag)) continue; // Only primary alignments considered.
-		aux->align[p->mapq]++;
-		// Extract the simulated position from query name in format 'rname_read1Pos_read2Pos'
-		char rname[64]; memset(rname, 0, sizeof(rname));
-		for(j=0; p->qname[j] && p->qname[j]!='_'; j++) {
-			rname[j] = p->qname[j];
-		}
-		if(!p->qname[j]) {
-			fprintf(stderr, "Reference-name absent in wgsim read name.\n");
-			abort();
-		}
-		int sim_pos1 = 0, sim_pos2 = 0;
-		for(j=j+1; p->qname[j] && p->qname[j]!='_'; j++) {
-			sim_pos1 *= 10; sim_pos1 += p->qname[j]-'0';
-		}
-		if(!p->qname[j]) {
-			fprintf(stderr, "read1Pos absent in wgsim read name.\n");
-			abort();
-		}
-		for(j=j+1; p->qname[j] && p->qname[j]!='_'; j++) {
-			sim_pos2 *= 10; sim_pos2 += p->qname[j]-'0';
-		}
-		if(!p->qname[j]) {
-			fprintf(stderr, "read2Pos absent in wgsim read name.\n");
-			abort();
-		}
-		int qlen = strlen(p->seq);
-		sim_pos2 = sim_pos2 - qlen + 1; // Correct the read2Pos on the forward strand.
-		if(strcmp(rname, p->rname) != 0) continue;
-		if(!is_rc(p->flag) && abs(p->pos-sim_pos1) <= opt->dis) aux->correct[p->mapq]++;
-		if( is_rc(p->flag) && abs(p->pos-sim_pos2) <= opt->dis) aux->correct[p->mapq]++;
 	}
-}
-
-static void tp_free(sam_core1_v *data) {
-	int i;
-	for(i = 0; i < data->n; i++) {
-		free(data->a[i].data);
+	fprintf(stdout, "%d\n", miss_n);
+	for (i = 0; i < 255; i++) {
+		if(align[i] == 0) continue;
+		fprintf(stdout, "%d %d %d\n", i, align[i], correct[i]);
 	}
-	free(data->a);
-	free(data);
-}
-
-void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_data, int n_steps);
-
-static void* tp_main(void *_aux, int step, void *_data) {
-	ktp_aux_t *aux = (ktp_aux_t*)_aux;
-	sam_core1_v *data = (sam_core1_v*)_data;
-	opt_t *opt = aux->opt;
-	if(step == 0) {
-		data = tp_input(opt->f, opt->lines_n);
-		if(data->n == 0) { free(data); return NULL; }
-		fprintf(stderr, "Input %ld records\n", data->n);
-		return data;
-	}
-	else if(step == 1) {
-		tp_process(data, aux);
-		return data;
-	}
-	else if(step == 2){
-		tp_free(data);
-		return NULL;
-	}
-	return NULL;
 }
 
 int weval_main(int argc, char** argv) {
@@ -148,23 +104,14 @@ int weval_main(int argc, char** argv) {
 	}
 	if(optind != argc-1) return usage();
 
-	opt->f = fopen(argv[optind], "r");
-	if(opt->f == NULL) {
+	gzFile f = gzopen(argv[optind], "r");
+	if(f == NULL) {
 		fprintf(stderr, "Open %s filed.\n", argv[optind]);
 		return 1;
 	}
+	analysis(f, opt);
 
-	ktp_aux_t *aux = calloc(1, sizeof(ktp_aux_t));
-	aux->opt = opt;
-	kt_pipeline(2, tp_main, aux, 3);
-	fprintf(stdout, "%d\n", aux->miss_n);
-
-	int i;
-	for (i = 0; i < 255; i++) {
-		if(aux->align[i] == 0) continue;
-		fprintf(stdout, "%d %d %d\n", i, aux->align[i], aux->correct[i]);
-	}
-
-	opt_destroy(opt);
+	gzclose(f);
+	free(opt);
 	return 0;
 }

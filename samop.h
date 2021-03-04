@@ -93,9 +93,9 @@ extern "C" {
 
 	/**
 	 * Extract the SAM-record from a SAM line.
-	 * @param line SAM line.
+	 * @param line Input SAM line.
 	 * @param len The length of $line.
-	 * @param r Returned record. Warn: r use the input memory space.
+	 * @param r Obtained record. Warn: $r uses outside memory of $line.
 	 */
 	void sam_record1(char *line, int len, sam_core1_t *r);
 
