@@ -23,6 +23,6 @@ typedef struct {
 
 open_fastq_t* hfastq_open(const char *fn);
 void hfastq_close(open_fastq_t *p);
-bseq1_t hfastq_fetch1(kseq_t *ks);
+bseq1_t hfastq_fetch1(const open_fastq_t *p);
 
 #endif //TOY_HFASTQ_H

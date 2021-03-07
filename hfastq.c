@@ -81,7 +81,8 @@ static inline void kseq2bseq1(const kseq_t *ks, bseq1_t *s)
 	s->l_seq = ks->seq.l;
 }
 
-bseq1_t hfastq_fetch1(kseq_t *ks) {
+bseq1_t hfastq_fetch1(const open_fastq_t *p) {
+	kseq_t *ks = p->ks;
 	bseq1_t seq;
 	memset(&seq, 0, sizeof(seq));
 	if(kseq_read(ks) < 0) return seq;

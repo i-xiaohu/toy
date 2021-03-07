@@ -20,7 +20,7 @@ typedef kvec_t(bseq1_t) bseq1_v;
 static bseq1_v load_all(const open_fastq_t *of) {
 	bseq1_v seqs; kv_init(seqs);
 	do {
-		bseq1_t x = hfastq_fetch1(of->ks);
+		bseq1_t x = hfastq_fetch1(of);
 		kv_push(bseq1_t, seqs, x);
 		if(x.name == NULL) break;
 	} while(1);
