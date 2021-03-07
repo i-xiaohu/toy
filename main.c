@@ -10,6 +10,7 @@ int chr_ext_main(int argc, char **argv);
 int pstat_main(int argc, char *argv[]);
 int weval_main(int argc, char *argv[]);
 int view_ref_main(int argc, char **argv);
+int sort_reads_main(int argc, char *argv[]);
 
 static void usage() {
 	fprintf(stderr, "\n");
@@ -23,6 +24,7 @@ static void usage() {
 	fprintf(stderr, "    [5] pstat         status of process\n");
 	fprintf(stderr, "    [6] weval         evaluate the SAM file of wgsim reads\n");
 	fprintf(stderr, "    [7] view-ref      view reference sequence\n");
+	fprintf(stderr, "    [8] sort-reads    sort reads lexicographically\n");
 	fprintf(stderr, "\n");
 }
 
@@ -40,6 +42,7 @@ int main(int argc, char *argv[]) {
 	else if(strcmp(argv[1], "pstat") == 0)       ret = pstat_main(argc-1, argv+1);
 	else if(strcmp(argv[1], "weval") == 0)       ret = weval_main(argc-1, argv+1);
 	else if(strcmp(argv[1], "view-ref") == 0)    ret = view_ref_main(argc-1, argv+1);
+	else if(strcmp(argv[1], "sort-reads") == 0)  ret = sort_reads_main(argc-1, argv+1);
 	else {
 		fprintf(stderr, "[%s] unrecognized command '%s'\n", __func__, argv[1]);
 		return 1;
