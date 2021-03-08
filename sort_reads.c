@@ -7,42 +7,71 @@
 
 #include "hfastq.h"
 #include "kvec.h"
-#include "ksort.h"
 
 static int usage() {
 	fprintf(stderr, "Program: sort_reads <in.fq> <reads> <out.fq>\n");
 	return 1;
 }
 
+typedef kvec_t(int) int_v;
+
 typedef struct {
-	bseq1_t seq;
-	uint64_t hash_v[5];
-} read_t;
+	int id; // -1 means not end of a read.
+	int_v more_ids; // todo: 如果有更多匹配项，遍历之后请释放这里的内存
+	long sons[5];
+} trie_node_t;
+typedef kvec_t(trie_node_t) trie_node_v;
+trie_node_v trie_nodes;
 
-typedef kvec_t(read_t) read_v;
-#define read_lt(a, b) (((a).hash_v[0]) < ((b).hash_v[0]) \
-	|| ((a).hash_v[1]) < ((b).hash_v[1])                          \
-	|| ((a).hash_v[2]) < ((b).hash_v[2])                          \
-	|| ((a).hash_v[3]) < ((b).hash_v[3])                          \
-	|| ((a).hash_v[4]) < ((b).hash_v[4])                          \
-	|| (strcmp((a).seq.seq, (b).seq.seq) < 0))
-KSORT_INIT(read, read_t, read_lt)
+typedef kvec_t(bseq1_t) read_v;
+read_v reads;
 
-static uint64_t base2num(char x) {
-	if(x == 'A') return 0;
-	else if(x == 'C') return 1;
-	else if(x == 'G') return 2;
-	else if(x == 'T') return 3;
-	else return 0;
+static trie_node_t new_node(int id) {
+	trie_node_t ret;
+	ret.id = id;
+	kv_init(ret.more_ids);
+	memset(ret.sons, -1, sizeof(ret.sons));
+	return ret;
 }
 
-static void set_hashv(int len, const char *a, uint64_t v[]) {
-	int i, j = 0;
-	// The len should less 160 stored five 64-bit number
+static void insert_string(trie_node_v *nodes, int id, int len, const char *s) {
+	int i;
+	long p = 0;
 	for(i = 0; i < len; i++) {
-		v[j] += base2num(a[i]);
-		v[j] <<= 2U;
-		if((i+1) % 32 == 0) j++;
+		int c = 4;
+		if(s[i] == 'A') c = 0;
+		else if(s[i] == 'C') c = 1;
+		else if(s[i] == 'G') c = 2;
+		else if(s[i] == 'T') c = 3;
+		if(nodes->a[p].sons[c] == -1) {
+			nodes->a[p].sons[c] = nodes->n;
+			if(i != len-1) kv_push(trie_node_t, *nodes, new_node(-1));
+			else kv_push(trie_node_t, *nodes, new_node(id));
+		} else {
+			long child = nodes->a[p].sons[c];
+			if(i == len-1) {
+				if(nodes->a[child].id == -1) nodes->a[child].id = id;
+				else kv_push(int, nodes->a[child].more_ids, id);
+			}
+		}
+		p = nodes->a[p].sons[c];
+	}
+}
+
+static void dump_sorted_reads(long fa) {
+	const trie_node_t *p = &trie_nodes.a[fa];
+	int i;
+	if(p->id != -1) {
+		printf("%s\n", reads.a[p->id].seq);
+		for(i = 0; i < p->more_ids.n; i++) {
+			printf("%s\n", reads.a[p->more_ids.a[i]].seq);
+		}
+	}
+	for(i = 0; i < 5; i++) {
+		long child = p->sons[i];
+		if(child != -1) {
+			dump_sorted_reads(child);
+		}
 	}
 }
 
@@ -54,23 +83,16 @@ int sort_reads_main(int argc, char *argv[]) {
 		return 1;
 	}
 
-	read_v reads; kv_init(reads);
-	read_t tmp;
+	kv_init(reads);
+	kv_init(trie_nodes);
+	kv_push(trie_node_t, trie_nodes, new_node(-1)); // Root node
 	while(1) {
-		tmp.seq = hfastq_fetch1(fi);
-		if(tmp.seq.l_seq == 0) break;
-		memset(tmp.hash_v, 0, sizeof(tmp.hash_v));
-		set_hashv(tmp.seq.l_seq, tmp.seq.seq, tmp.hash_v);
-		kv_push(read_t, reads, tmp);
+		bseq1_t read = hfastq_fetch1(fi);
+		if(read.l_seq == 0) break;
+		insert_string(&trie_nodes, reads.n-1, read.l_seq, read.seq);
+		kv_push(bseq1_t, reads, read);
 	}
+	dump_sorted_reads(0);
 
-	ks_introsort(read, reads.n, reads.a);
-	int i, cnt = 0;
-	for(i = 1; i < reads.n; i++) {
-		if(strcmp(reads.a[i-1].seq.seq, reads.a[i].seq.seq) <= 0) {
-			cnt++;
-		}
-	}
-	printf("[%d, %ld]", cnt+1, reads.n);
 	return 0;
 }
