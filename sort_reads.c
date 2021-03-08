@@ -37,24 +37,27 @@ static trie_node_t new_node(int id) {
 static void insert_string(trie_node_v *nodes, int id, int len, const char *s) {
 	int i;
 	long p = 0;
+	fprintf(stderr, "%s %d\n", s, len);
 	for(i = 0; i < len; i++) {
 		int c = 4;
 		if(s[i] == 'A') c = 0;
 		else if(s[i] == 'C') c = 1;
 		else if(s[i] == 'G') c = 2;
 		else if(s[i] == 'T') c = 3;
-		if(nodes->a[p].sons[c] == -1) {
-			nodes->a[p].sons[c] = nodes->n;
+		long child = nodes->a[p].sons[c];
+		if(child == -1) {
+			child = nodes->n;
+			nodes->a[p].sons[c] = child;
 			if(i != len-1) kv_push(trie_node_t, *nodes, new_node(-1));
 			else kv_push(trie_node_t, *nodes, new_node(id));
 		} else {
-			long child = nodes->a[p].sons[c];
 			if(i == len-1) {
 				if(nodes->a[child].id == -1) nodes->a[child].id = id;
 				else kv_push(int, nodes->a[child].more_ids, id);
 			}
 		}
-		p = nodes->a[p].sons[c];
+		fprintf(stderr, "[%ld] -> [%ld] [%d] [%d, %c]\n", p, child, nodes->a[child].id, c, s[i]);
+		p = child;
 	}
 }
 
@@ -89,7 +92,7 @@ int sort_reads_main(int argc, char *argv[]) {
 	while(1) {
 		bseq1_t read = hfastq_fetch1(fi);
 		if(read.l_seq == 0) break;
-		insert_string(&trie_nodes, reads.n-1, read.l_seq, read.seq);
+		insert_string(&trie_nodes, reads.n, read.l_seq, read.seq);
 		kv_push(bseq1_t, reads, read);
 	}
 	dump_sorted_reads(0);
