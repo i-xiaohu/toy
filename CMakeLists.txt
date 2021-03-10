@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(mini_tools_dev C)
+project(toy C)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -O2 -Wno-unused-function")
 add_definitions(-DUSE_MALLOC_WRAPPERS)
