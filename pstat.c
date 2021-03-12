@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <getopt.h>
 #include <unistd.h>
+#include "utils.h"
+#include "kstring.h"
 
 #define PNAME_LINE  1
 #define VMSIZE_LINE 13
@@ -64,6 +66,18 @@ int pstat_main(int argc, char *argv[]) {
 	if(argc == 1) {
 		return usage();
 	}
+	double ctime = cputime(), rtime = realtime();
+	kstring_t cmd; memset(&cmd, 0, sizeof(cmd));
+	int i;
+	for(i = 1; i < argc; i++) {
+		kputs(argv[i], &cmd);
+		kputc(' ', &cmd);
+	}
+	system(cmd.s);
+	free(cmd.s);
+	fprintf(stderr, "%.2f %.2f\n", cputime()-ctime, realtime()-rtime);
+	exit(-1);
+
 	int c, delay = 3;
 
 	int pid = 0;
