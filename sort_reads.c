@@ -13,7 +13,7 @@
 
 static int usage() {
 	fprintf(stderr, "Program: sort_reads <source.fq> <reordered reads>\n");
-//	fprintf(stderr, "    The completed reordered FASTQ outputted stdout.\n");
+	fprintf(stderr, "Usage: sort-reads in.fq.gz in.reads.gz | gzip > out.fq.gz\n");
 	return 1;
 }
 
@@ -183,20 +183,20 @@ int sort_reads_main(int argc, char *argv[]) {
 
 	kv_init(reorder_reads);
 	long bases_memory = 0;
-//	while(1) {
-//		bseq1_t read = hfastq_fetch1(rr);
-//		if(read.l_seq == 0) break;
-//		free(read.name); free(read.comment);
-//		read.name = NULL;
-//		bases_memory += read.l_seq;
-//		kv_push(bseq1_t , reorder_reads, read);
-//	}
+	while(1) {
+		bseq1_t read = hfastq_fetch1(rr);
+		if(read.l_seq == 0) break;
+		free(read.name); free(read.comment);
+		read.name = NULL;
+		bases_memory += read.l_seq;
+		kv_push(bseq1_t , reorder_reads, read);
+	}
 	fprintf(stderr, "Input %s reordered reads[%sMB], %s elapsed.\n",
 		 fmtn(reorder_reads.n), fmtn(bases_memory/1024/1024), fmtt((int)realtime()-rtime));
 
 	// Constructing trie within chunk size.
 	fprintf(stderr, "Starting reading source FASTQ file '%s'\n", argv[1]);
-	int i, done = 0, chunk_n = 1;
+	int i, done = 0, chunk_n = 1, all_matched = 0;
 	same_cnt = 0;
 	kv_init(source_reads); // For keeping qname and qual.
 	while(!done) {
@@ -236,6 +236,7 @@ int sort_reads_main(int argc, char *argv[]) {
 				matched++;
 			}
 		}
+		all_matched += matched;
 		fprintf(stderr, "%s read matched.\n", fmtn(matched));
 
 		// Destroy trie.
@@ -244,11 +245,17 @@ int sort_reads_main(int argc, char *argv[]) {
 	}
 
 	fprintf(stderr, "Found %s same reads, taking %.2f%% of the reads in trie.\n", fmtn(same_cnt), 100.0*same_cnt/source_reads.n);
+	if(all_matched != reorder_reads.n) {
+		fprintf(stderr, "Warning: %d reordered reads are not matched.\n", reorder_reads.n - all_matched);
+	} else {
+		fprintf(stderr, "All of reordered reads are matched.\n");
+	}
 
 	// Output complete reordered FASTQ.
 	for(i = 0; i < reorder_reads.n; i++) {
 		const bseq1_t *b = &reorder_reads.a[i];
-		fprintf(stdout, "@%s", b->name);
+		if(b->qual) fprintf(stdout, "@%s", b->name);
+		else fprintf(stdout, ">%s", b->name);
 		if(b->comment) fprintf(stdout, " %s", b->comment);
 		fprintf(stdout, "\n");
 		fprintf(stdout, "%s\n", b->seq);
