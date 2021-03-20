@@ -12,8 +12,11 @@
 #define TRIE_CHAR 1000000000 // At most 1G characters constructing a trie.
 
 static int usage() {
-	fprintf(stderr, "Program: sort_reads <source.fq> <reordered reads>\n");
+	fprintf(stderr, "Program: sort_reads [options] <source.fq> <reordered reads>\n");
 	fprintf(stderr, "Usage: sort-reads in.fq.gz in.reads.gz | gzip > out.fq.gz\n");
+	fprintf(stderr, "Options:\n");
+	fprintf(stderr, "    -t [INT] Thread number to search[24].\n");
+	fprintf(stderr, "\n");
 	return 1;
 }
 
@@ -140,34 +143,84 @@ static void fill_read(bseq1_t *dst, const bseq1_t* src) {
 	dst->qual = src->qual;
 }
 
-static int search(const trie_node_v *nodes, bseq1_t *r) {
+/** Parallel supported */
+extern void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n);
+
+typedef kvec_t(long) long_v;
+
+typedef struct {
+	long_v *sub_rid, *sub_tid;  // read_id and tree_node_id.
+	long_v rid, tid;
+} worker_t;
+
+static void search(void *data, long seq_id, int t_id) {
+	worker_t *w = (worker_t*)data;
+	bseq1_t *r = &reorder_reads.a[seq_id];
+	long_v *rid = &w->sub_rid[t_id], *tid = &w->sub_tid[t_id];
+	if(r->name) return ;
 	int i;
 	long p = 0;
 	for(i = 0; i < r->l_seq; i++) {
 		int c = char2num(r->seq[i]);
-		const trie_node_t *fa = &nodes->a[p];
-		if(fa->sons[c] == -1) return -1; // Not matched.
-		trie_node_t *son = &nodes->a[fa->sons[c]];
+		const trie_node_t *fa = &trie_nodes.a[p];
+		if(fa->sons[c] == -1) return ; // The query base has not matched node.
+		trie_node_t *son = &trie_nodes.a[fa->sons[c]];
 		if(i == r->l_seq - 1) {
-			// Consider ids as stack.
-			if(son->id == -1) return -1; // Not end-to-end matched.
-			if(son->id == -2) return -2; // Matched at end, but token by previous reads.
-			if(son->more_ids.n > 0) {
-				int id = son->more_ids.a[--son->more_ids.n];
-				fill_read(r, &source_reads.a[id]);
-			} else {
-				int id = son->id;
-				fill_read(r, &source_reads.a[id]);
-				son->id = -2;
-			}
+			if(son->id == -1) return ; // The ending base is matching 'son', but 'son' is not the end of any read.
+			kv_push(long, *rid, seq_id);
+			kv_push(long, *tid, fa->sons[c]);
 		}
 		p = fa->sons[c];
 	}
-	return 0;
 }
 
+static int sumup_search(int n_threads, worker_t *w) {
+	int i, j;
+	kv_init(w->rid); kv_init(w->tid);
+	for(i = 0; i < n_threads; i++) {
+		const long_v *sr = &w->sub_rid[i];
+		const long_v *st = &w->sub_tid[i];
+		for(j = 0; j < sr->n; j++) {
+			kv_push(long, w->rid, sr->a[j]);
+			kv_push(long, w->tid, st->a[j]);
+		}
+		free(sr->a); free(st->a);
+	}
+	free(w->sub_rid); free(w->sub_tid);
+
+	int ret = 0;
+	for(i = 0; i < w->rid.n; i++) {
+		long seq_id = w->rid.a[i];
+		long son_id = w->tid.a[i];
+		bseq1_t *r = &reorder_reads.a[seq_id];
+		trie_node_t *son = &trie_nodes.a[son_id];
+		if(son->id == -2) {
+			continue; // The stack is empty, the read has no match.
+		}
+		// See the ids as a stack.
+		if(son->more_ids.n > 0) {
+			int id = son->more_ids.a[--son->more_ids.n];
+			fill_read(r, &source_reads.a[id]);
+		} else {
+			int id = son->id;
+			fill_read(r, &source_reads.a[id]);
+			son->id = -2; // Set the stack empty.
+		}
+		ret++;
+	}
+	free(w->rid.a); free(w->tid.a);
+	return ret;
+}
+
+
 int sort_reads_main(int argc, char *argv[]) {
-	if(argc != 3) return usage();
+	int c, n_threads = 24;
+	while((c = getopt(argc, argv, "t:")) >= 0) {
+		if(c == 't') n_threads = atoi(optarg);
+		else return usage();
+	}
+	if(argc-optind != 2) return usage();
+
 	double rtime = realtime();
 	kv_init(fmt_nums);
 	open_fastq_t *sf = hfastq_open(argv[1]);
@@ -200,9 +253,11 @@ int sort_reads_main(int argc, char *argv[]) {
 	same_cnt = 0;
 	kv_init(source_reads); // For keeping qname and qual.
 	while(!done) {
+		// Construct trie.
 		kv_init(trie_nodes);
 		kv_push(trie_node_t, trie_nodes, new_node(-1)); // Root node
 		long reads_memory = 0, bases_n = 0, reads_n = 0;
+		double time1 = realtime();
 		while(1) {
 			bseq1_t read = hfastq_fetch1(sf);
 			if(read.l_seq == 0) {
@@ -225,23 +280,21 @@ int sort_reads_main(int argc, char *argv[]) {
 		  fmtn(bases_n * sizeof(trie_node_t)/1024/1024),
 		  fmtn(reads_n),
 		  fmtn(reads_memory/1024/1024),
-		  fmtt((int)realtime()-rtime));
+		  fmtt((int)realtime()-time1));
 
 		// Search
-		int matched = 0;
-		for(i = 0; i < reorder_reads.n; i++) {
-			bseq1_t *p = &reorder_reads.a[i];
-			if(p->name) continue; // Found the matched in trie.
-			if(search(&trie_nodes, p) == 0) {
-				matched++;
-			}
-		}
+		time1 = realtime();
+		worker_t w;
+		w.sub_tid = calloc(n_threads, sizeof(long_v));
+		w.sub_rid = calloc(n_threads, sizeof(long_v));
+		kt_for(n_threads, search, &w, reorder_reads.n);
+		int matched = sumup_search(n_threads, &w);
 		all_matched += matched;
-		fprintf(stderr, "%s read matched.\n", fmtn(matched));
+		fprintf(stderr, "%s read matched, %s elapsed.\n", fmtn(matched), fmtt((int)realtime()-time1));
+		if(matched != reads_n) fprintf(stderr, "Warning: The trie is not matched completely.\n");
 
 		// Destroy trie.
 		destroy_trie(&trie_nodes);
-		if(matched != reads_n) fprintf(stderr, "Warning: The trie is not matched completely.\n");
 	}
 
 	fprintf(stderr, "Found %s same reads, taking %.2f%% of the reads in trie.\n", fmtn(same_cnt), 100.0*same_cnt/source_reads.n);
