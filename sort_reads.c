@@ -13,9 +13,9 @@
 
 static int usage() {
 	fprintf(stderr, "Program: sort_reads [options] <source.fq> <reordered reads>\n");
-	fprintf(stderr, "Usage: sort-reads in.fq.gz in.reads.gz | gzip > out.fq.gz\n");
+	fprintf(stderr, "Usage:   sort-reads in.fq.gz reordered.reads | gzip > out.fq.gz\n");
 	fprintf(stderr, "Options:\n");
-	fprintf(stderr, "    -t [INT] Thread number to search[24].\n");
+	fprintf(stderr, "    -t [INT] Thread number to search[24]\n");
 	fprintf(stderr, "\n");
 	return 1;
 }
@@ -221,26 +221,24 @@ int sort_reads_main(int argc, char *argv[]) {
 	}
 	if(argc-optind != 2) return usage();
 
-	double rtime = realtime();
 	kv_init(fmt_nums);
-	open_fastq_t *sf = hfastq_open(argv[1]);
-	if(sf == NULL) {
-		fprintf(stderr, "Open source FASTQ file %s failed\n", argv[1]);
-		return 1;
-	}
-	open_fastq_t *rr = hfastq_open(argv[2]);
+
+	double rtime = realtime();
+	fprintf(stderr, "Loading reordered reads files '%s' into memory.\n", argv[2]);
+	gzFile rr = gzopen(argv[2], "r");
 	if(rr == NULL) {
 		fprintf(stderr, "Open reordered reads file %s failed\n", argv[2]);
 		return 1;
 	}
-
 	kv_init(reorder_reads);
 	long bases_memory = 0;
-	while(1) {
-		bseq1_t read = hfastq_fetch1(rr);
-		if(read.l_seq == 0) break;
-		free(read.name); free(read.comment);
-		read.name = NULL;
+	char buf[10240];
+	while(gzgets(rr, buf, sizeof(buf))) {
+		int len = strlen(buf);
+		if(buf[len-1] == '\n') buf[--len] = '\0';
+		bseq1_t read; memset(&read, 0, sizeof(read));
+		read.seq = strdup(buf);
+		read.l_seq = len;
 		bases_memory += read.l_seq;
 		kv_push(bseq1_t , reorder_reads, read);
 	}
@@ -249,15 +247,20 @@ int sort_reads_main(int argc, char *argv[]) {
 
 	// Constructing trie within chunk size.
 	fprintf(stderr, "Starting reading source FASTQ file '%s'\n", argv[1]);
+	open_fastq_t *sf = hfastq_open(argv[1]);
+	if(sf == NULL) {
+		fprintf(stderr, "Open source FASTQ file %s failed\n", argv[1]);
+		return 1;
+	}
 	int i, done = 0, chunk_n = 1, all_matched = 0;
 	same_cnt = 0;
 	kv_init(source_reads); // For keeping qname and qual.
 	while(!done) {
 		// Construct trie.
+		double time1 = realtime();
 		kv_init(trie_nodes);
 		kv_push(trie_node_t, trie_nodes, new_node(-1)); // Root node
 		long reads_memory = 0, bases_n = 0, reads_n = 0;
-		double time1 = realtime();
 		while(1) {
 			bseq1_t read = hfastq_fetch1(sf);
 			if(read.l_seq == 0) {
@@ -304,28 +307,23 @@ int sort_reads_main(int argc, char *argv[]) {
 		fprintf(stderr, "All of reordered reads are matched.\n");
 	}
 
-	// Output complete reordered FASTQ.
+	// Output complete reordered FASTQ and free allocated memory.
+	free(source_reads.a);
 	for(i = 0; i < reorder_reads.n; i++) {
 		const bseq1_t *b = &reorder_reads.a[i];
-		if(b->qual) fprintf(stdout, "@%s", b->name);
-		else fprintf(stdout, ">%s", b->name);
+		if(b->qual) fprintf(stdout, "@%s", b->name); // FASTQ
+		else fprintf(stdout, ">%s", b->name); // FASTA.
 		if(b->comment) fprintf(stdout, " %s", b->comment);
 		fprintf(stdout, "\n");
 		fprintf(stdout, "%s\n", b->seq);
 		if(b->qual) {
 			fprintf(stdout, "+\n");
 			fprintf(stdout, "%s\n", b->qual);
-		} // else FASTA.
-	}
-
-	// Free allocated memory.
-	free(source_reads.a);
-	for(i = 0; i < reorder_reads.n; i++) {
-		const bseq1_t *p = &reorder_reads.a[i];
-		free(p->name);free(p->comment); free(p->seq); free(p->qual);
+		}
+		free(b->name); free(b->comment); free(b->seq); free(b->qual);
 	}
 	free(reorder_reads.a);
-	hfastq_close(sf); hfastq_close(rr);
+	hfastq_close(sf); gzclose(rr);
 	fn_destroy();
 
 	return 0;
