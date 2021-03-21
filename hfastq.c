@@ -86,7 +86,6 @@ bseq1_t hfastq_fetch1(const open_fastq_t *p) {
 	bseq1_t seq;
 	memset(&seq, 0, sizeof(seq));
 	if(kseq_read(ks) < 0) return seq;
-	trim_readno(&ks->name);
 	kseq2bseq1(ks, &seq);
 	return seq;
 }
