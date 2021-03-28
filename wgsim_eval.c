@@ -13,7 +13,7 @@
 static int usage() {
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Program:    weval evaluate the SAM file of wgsim reads\n");
-	fprintf(stderr, "Usage:      weval [options] <in.sam>\n");
+	fprintf(stderr, "Usage:      weval [options] <in.sam.gz>\n");
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Options:\n");
 	fprintf(stderr, "            -d [INT] The maximal distance allowed [10bp].\n");
