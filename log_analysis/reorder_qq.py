@@ -1,16 +1,11 @@
-# D:\ClionProject\zsmem-experiments\log\toy_sort
-import os
-import math
-import sys
-sys.path.append(r'D:\ClionProject\zsmem-experiments\log\analysis')
-from utils import *
+from log_analysis.utils import *
 
 
 def fmt2sec(f):
     x = f.split(":")
     ret = int(x[0]) * 3600
-    ret+= int(x[1]) * 60
-    ret+= int(x[2])
+    ret += int(x[1]) * 60
+    ret += int(x[2])
     return ret
 
 
