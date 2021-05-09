@@ -12,10 +12,10 @@
 #define TRIE_CHAR 1000000000 // At most 1G characters constructing a trie.
 
 static int usage() {
-	fprintf(stderr, "Program: sort_reads [options] <source.fq> <reordered reads>\n");
-	fprintf(stderr, "Usage:   sort-reads in.fq.gz reordered.reads | gzip > out.fq.gz\n");
+	fprintf(stderr, "Program: Reorder the query name and quality scores by ONLY bases and full FASTQ.\n");
+	fprintf(stderr, "Usage:   reorder-qq [options] <in.fq.gz> <reordered.bases> | gzip > out.fq.gz\n");
 	fprintf(stderr, "Options:\n");
-	fprintf(stderr, "    -t [INT] Thread number to search[24]\n");
+	fprintf(stderr, "    -t [INT] Thread number to search [24]\n");
 	fprintf(stderr, "\n");
 	return 1;
 }
@@ -213,7 +213,7 @@ static int sumup_search(int n_threads, worker_t *w) {
 }
 
 
-int sort_reads_main(int argc, char *argv[]) {
+int reorder_qq_main(int argc, char *argv[]) {
 	int c, n_threads = 24;
 	while((c = getopt(argc, argv, "t:")) >= 0) {
 		if(c == 't') n_threads = atoi(optarg);
