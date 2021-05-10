@@ -9,6 +9,7 @@ int chr_ext_main(int argc, char **argv);
 int weval_main(int argc, char *argv[]);
 int view_ref_main(int argc, char **argv);
 int reorder_qq_main(int argc, char *argv[]);
+int reorder_R2_main(int argc, char **argv);
 
 static void usage() {
 	fprintf(stderr, "\n");
@@ -22,6 +23,7 @@ static void usage() {
 	fprintf(stderr, "    [%d] weval         Evaluate the SAM file of wgsim reads\n", ++cnt);
 	fprintf(stderr, "    [%d] view-ref      View reference sequence\n", ++cnt);
 	fprintf(stderr, "    [%d] reorder-qq    Reorder query name and quality scores by bases\n", ++cnt);
+	fprintf(stderr, "    [%d] reorder-R2    Reorder Reads2 by Reads1\n", ++cnt);
 	fprintf(stderr, "\n");
 }
 
@@ -38,6 +40,7 @@ int main(int argc, char *argv[]) {
 	else if(strcmp(argv[1], "weval") == 0)       ret = weval_main(argc-1, argv+1);
 	else if(strcmp(argv[1], "view-ref") == 0)    ret = view_ref_main(argc-1, argv+1);
 	else if(strcmp(argv[1], "reorder-qq") == 0)  ret = reorder_qq_main(argc-1, argv+1);
+	else if(strcmp(argv[1], "reorder-R2") == 0)  ret = reorder_R2_main(argc-1, argv+1);
 	else {
 		fprintf(stderr, "[%s] unrecognized command '%s'\n", __func__, argv[1]);
 		return 1;
