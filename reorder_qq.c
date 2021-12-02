@@ -12,8 +12,8 @@
 #define TRIE_CHAR 1000000000 // At most 1G characters constructing a trie.
 
 static int usage() {
-	fprintf(stderr, "Program: Reorder the query name and quality scores by ONLY bases and full FASTQ.\n");
-	fprintf(stderr, "Usage:   reorder-qq [options] <in.fq.gz> <reordered.bases> | gzip > out.fq.gz\n");
+	fprintf(stderr, "Program: Reorder the query name and quality scores by ONLY bases and FULL FASTQ.\n");
+	fprintf(stderr, "Usage:   reorder-qq [options] <reordered.reads> <in.fq.gz> > out.fq\n");
 	fprintf(stderr, "Options:\n");
 	fprintf(stderr, "    -t [INT] Thread number to search [24]\n");
 	fprintf(stderr, "\n");
@@ -224,16 +224,17 @@ int reorder_qq_main(int argc, char *argv[]) {
 	kv_init(fmt_nums);
 
 	double rtime = realtime();
-	fprintf(stderr, "Loading reordered reads files '%s' into memory.\n", argv[2]);
-	gzFile rr = gzopen(argv[2], "r");
+	fprintf(stderr, "Loading reordered reads files '%s' into memory.\n", argv[optind]);
+	gzFile rr = gzopen(argv[optind], "r");
 	if(rr == NULL) {
-		fprintf(stderr, "Open reordered reads file %s failed\n", argv[2]);
+		fprintf(stderr, "Open reordered reads file %s failed\n", argv[optind]);
 		return 1;
 	}
 	kv_init(reorder_reads);
 	long bases_memory = 0;
 	char buf[10240];
 	while(gzgets(rr, buf, sizeof(buf))) {
+		if (buf[0] == '@') continue;
 		int len = strlen(buf);
 		if(buf[len-1] == '\n') buf[--len] = '\0';
 		bseq1_t read; memset(&read, 0, sizeof(read));
@@ -246,15 +247,16 @@ int reorder_qq_main(int argc, char *argv[]) {
 		 fmtn(reorder_reads.n), fmtn(bases_memory/1024/1024), fmtt((int)realtime()-rtime));
 
 	// Constructing trie within chunk size.
-	fprintf(stderr, "Starting reading source FASTQ file '%s'\n", argv[1]);
-	open_fastq_t *sf = hfastq_open(argv[1]);
+	fprintf(stderr, "Starting reading source FASTQ file '%s'\n", argv[optind+1]);
+	open_fastq_t *sf = hfastq_open(argv[optind+1]);
 	if(sf == NULL) {
-		fprintf(stderr, "Open source FASTQ file %s failed\n", argv[1]);
+		fprintf(stderr, "Open source FASTQ file %s failed\n", argv[optind+1]);
 		return 1;
 	}
-	int i, done = 0, chunk_n = 1, all_matched = 0;
+	int i, done = 0, chunk_n = 0, all_matched = 0;
 	same_cnt = 0;
 	kv_init(source_reads); // For keeping qname and qual.
+	double construct_time = 0, search_time = 0;
 	while(!done) {
 		// Construct trie.
 		double time1 = realtime();
@@ -278,12 +280,9 @@ int reorder_qq_main(int argc, char *argv[]) {
 			reads_memory += sizeof(read);
 			if(bases_n >= TRIE_CHAR) break;
 		}
-		fprintf(stderr, "Chunk %d: constructed trie[%sMB] of by %s reads[%sMB], %s elapsed.\n",
-		  chunk_n++,
-		  fmtn(bases_n * sizeof(trie_node_t)/1024/1024),
-		  fmtn(reads_n),
-		  fmtn(reads_memory/1024/1024),
-		  fmtt((int)realtime()-time1));
+		if (reads_n != 0) chunk_n++;
+		else break;
+		construct_time += realtime() - time1;
 
 		// Search
 		time1 = realtime();
@@ -293,18 +292,19 @@ int reorder_qq_main(int argc, char *argv[]) {
 		kt_for(n_threads, search, &w, reorder_reads.n);
 		int matched = sumup_search(n_threads, &w);
 		all_matched += matched;
-		fprintf(stderr, "%s read matched, %s elapsed.\n", fmtn(matched), fmtt((int)realtime()-time1));
-		if(matched != reads_n) fprintf(stderr, "Warning: The trie is not matched completely.\n");
-
 		// Destroy trie.
 		destroy_trie(&trie_nodes);
+		if(matched != reads_n) fprintf(stderr, "Warning: The trie is not matched completely.\n");
+		search_time += realtime() - time1;
 	}
+	fprintf(stderr, "Constructing %d tries in %s, searching in %s\n",
+		 chunk_n, fmtt((int)(construct_time+0.499)), fmtt((int)(search_time+0.499)));
 
 	fprintf(stderr, "Found %s same reads, taking %.2f%% of the reads in trie.\n", fmtn(same_cnt), 100.0*same_cnt/source_reads.n);
 	if(all_matched != reorder_reads.n) {
 		fprintf(stderr, "Warning: %d reordered reads are not matched.\n", reorder_reads.n - all_matched);
 	} else {
-		fprintf(stderr, "All of reordered reads are matched.\n");
+		fprintf(stderr, "All of %s reordered reads are matched.\n", fmtn(all_matched));
 	}
 
 	// Output complete reordered FASTQ and free allocated memory.

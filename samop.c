@@ -11,7 +11,7 @@
 static int usage() {
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Program:    samop handle SAM file\n");
-	fprintf(stderr, "Usage:      samop <in.sam>\n");
+	fprintf(stderr, "Usage:      samop <in.sam.gz>\n");
 	fprintf(stderr, "\n");
 	return 1;
 }
@@ -140,9 +140,9 @@ static void analysis(gzFile f) {
 	sam_hdr_t h; memset(&h, 0, sizeof(h));
 	char line[65536]; // for next generation sequence, 64K buffer is safe and enough.
 	sam_core1_t core;
-	int cnt = 0;
-	int unmap_n = 0;
-	int sec_n = 0, pri_n = 0, sup_n = 0;
+	long cnt = 0;
+	long unmap_n = 0;
+	long sec_n = 0, pri_n = 0, sup_n = 0;
 	long as = 0, nm = 0;
 	while(gzgets(f, line, sizeof(line)) != NULL) {
 		int len = (int)strlen(line);
@@ -151,11 +151,6 @@ static void analysis(gzFile f) {
 			sam_header(line + 1, len - 1, &h); // skip the char '@'
 		} else {
 			sam_record1(line, len, &core);
-			if(is_read1(core.flag) || is_read2(core.flag)) {
-				fprintf(stderr, "Paired-end alignments are not supportive.\n");
-				abort();
-			}
-
 			const sam_core1_t *r = &core;
 			cnt++;
 			if(unmap(r->flag)) {
@@ -175,13 +170,13 @@ static void analysis(gzFile f) {
 	long ref_len = get_ref_len(&h);
 	sam_header_free(&h);
 	fprintf(stderr, "Reference_length: %ld\n", ref_len);
-	fprintf(stderr, "Alignments:       %d\n", cnt);
-	fprintf(stderr, "Unmap:            %d\n", unmap_n);
-	fprintf(stderr, "Primary:          %d\n", pri_n);
-	fprintf(stderr, "Supplementary:    %d\n", sup_n);
-	fprintf(stderr, "Secondary:        %d\n", sec_n);
-	fprintf(stderr, "Alignment_Score   %.2f\n", 1.0 * as / pri_n);
-	fprintf(stderr, "Edit_distance     %.2f\n", 1.0 * nm / pri_n);
+	fprintf(stderr, "Alignments:       %ld\n", cnt);
+	fprintf(stderr, "Unmap:            %ld\n", unmap_n);
+	fprintf(stderr, "Primary:          %ld\n", pri_n);
+	fprintf(stderr, "Supplementary:    %ld\n", sup_n);
+	fprintf(stderr, "Secondary:        %ld\n", sec_n);
+	fprintf(stderr, "Alignment_Score:  %.2f\n", 1.0 * as / pri_n);
+	fprintf(stderr, "Edit_distance:    %.2f\n", 1.0 * nm / pri_n);
 	fprintf(stderr, "\n");
 }
 
